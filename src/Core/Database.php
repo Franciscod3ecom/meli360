@@ -1,10 +1,4 @@
 <?php
-/**
- * Classe responsável pela conexão com o banco de dados.
- * Utiliza o padrão Singleton para garantir que exista apenas uma instância
- * da conexão PDO durante todo o ciclo de vida da requisição.
- */
-
 namespace App\Core;
 
 use PDO;
@@ -12,82 +6,53 @@ use PDOException;
 
 class Database
 {
-    /**
-     * @var PDO|null A única instância da conexão PDO.
-     */
     private static ?PDO $instance = null;
 
-    /**
-     * O construtor é privado para impedir a criação de novas instâncias
-     * com o operador 'new'.
-     */
     private function __construct() {}
-
-    /**
-     * Impede a clonagem da instância (padrão Singleton).
-     */
     private function __clone() {}
+    public function __wakeup() { throw new \Exception("Cannot unserialize a singleton."); }
 
-    /**
-     * Impede a desserialização da instância (padrão Singleton).
-     */
-    public function __wakeup()
-    {
-        throw new \Exception("Cannot unserialize a singleton.");
-    }
-
-    /**
-     * Método estático que controla o acesso à instância PDO.
-     * Cria a conexão na primeira chamada e a retorna nas chamadas subsequentes.
-     *
-     * @return PDO A instância da conexão PDO.
-     * @throws PDOException Se a conexão com o banco de dados falhar.
-     */
     public static function getInstance(): PDO
     {
         if (self::$instance === null) {
-            // Obtém as credenciais das variáveis de ambiente
-            $host = getenv('DB_HOST');
-            $db   = getenv('DB_DATABASE');
-            $user = getenv('DB_USERNAME');
-            $pass = getenv('DB_PASSWORD');
-
-            $missingVars = [];
-            if ($host === false) $missingVars[] = 'DB_HOST';
-            if ($db === false)   $missingVars[] = 'DB_DATABASE';
-            if ($user === false) $missingVars[] = 'DB_USERNAME';
-            if ($pass === false) $missingVars[] = 'DB_PASSWORD';
-
-            if (!empty($missingVars)) {
-                $errorMessage = 'Erro Crítico: As seguintes variáveis de ambiente do banco de dados não foram definidas no arquivo .env: ' . implode(', ', $missingVars);
-                error_log($errorMessage);
-                // Lança uma exceção genérica para o usuário final por segurança.
-                throw new PDOException('Erro de configuração do servidor.', 500);
+            if (!defined('DB_HOST') || !defined('DB_DATABASE') || !defined('DB_USERNAME') || !defined('DB_PASSWORD')) {
+                die('Erro Crítico: Constantes do banco de dados não definidas. Verifique se o config.php está sendo incluído e se o .env está sendo carregado.');
             }
 
-            // String de Conexão (DSN - Data Source Name)
-            $dsn = "mysql:host={$host};dbname={$db};charset=utf8mb4";
-
-            // Opções da conexão PDO para performance e segurança
+            $dsn = 'mysql:host=' . DB_HOST . ';dbname=' . DB_DATABASE . ';port=' . DB_PORT . ';charset=utf8mb4';
+            
             $options = [
-                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION, // Lança exceções em caso de erro SQL
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,       // Retorna resultados como arrays associativos
-                PDO::ATTR_EMULATE_PREPARES   => false,                  // Usa prepared statements nativos do MySQL
+                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES   => false,
             ];
 
             try {
-                // Tenta criar a instância da conexão PDO
-                self::$instance = new PDO($dsn, $user, $pass, $options);
+                self::$instance = new PDO($dsn, DB_USERNAME, DB_PASSWORD, $options);
             } catch (PDOException $e) {
-                // Em caso de falha na conexão, para a execução e exibe uma mensagem genérica.
-                // Loga o erro detalhado e relança a exceção para que um handler de erro global possa tratá-la.
-                error_log("Falha na conexão com o banco de dados: " . $e->getMessage());
-                // Lançar a exceção permite que um error handler global capture o erro e mostre uma página amigável.
-                throw new PDOException('Erro: Não foi possível conectar ao banco de dados.', (int)$e->getCode(), $e);
+                // =====================================================================
+                // MUDANÇA CRÍTICA PARA DEPURAÇÃO
+                // Em vez de uma mensagem genérica, vamos exibir o erro real do PDO.
+                // Isso nos dirá se é "Access denied", "Unknown database", "Connection refused", etc.
+                // =====================================================================
+                
+                // Primeiro, logamos o erro para registro futuro
+                error_log("FALHA NA CONEXÃO PDO: " . $e->getMessage());
+
+                // Em seguida, exibimos uma mensagem detalhada para depuração
+                die(
+                    "<h1>Erro de Conexão com o Banco de Dados</h1>" .
+                    "<p>Não foi possível estabelecer uma conexão com o MySQL.</p>" .
+                    "<p><strong>Mensagem de Erro do Servidor:</strong> <pre style='background-color: #f2f2f2; border: 1px solid #ccc; padding: 10px;'>" . htmlspecialchars($e->getMessage()) . "</pre></p>" .
+                    "<p><strong>Verifique os seguintes pontos:</strong></p>" .
+                    "<ul>" .
+                    "<li>As credenciais (Host, Nome do Banco, Usuário, Senha) no seu arquivo <strong>.env</strong> estão 100% corretas?</li>" .
+                    "<li>O host do banco de dados na sua hospedagem é realmente 'localhost'? Tente usar '127.0.0.1'.</li>" .
+                    "<li>O usuário do banco de dados tem permissão para acessar a partir deste servidor?</li>" .
+                    "</ul>"
+                );
             }
         }
-
-        // Retorna a instância PDO existente ou recém-criada.
         return self::$instance;
     }
 }
