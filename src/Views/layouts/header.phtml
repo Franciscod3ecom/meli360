@@ -1,0 +1,17 @@
+<header class="bg-white shadow-sm sticky top-0 z-10">
+    <nav class="container mx-auto px-4 lg:px-6 py-3 flex justify-between items-center">
+        <div class="flex items-center space-x-8">
+            <a href="/dashboard" class="text-xl font-bold text-gray-800">🚀 MELI 360</a>
+            <!-- Links de Navegação -->
+            <div class="hidden md:flex items-center space-x-6">
+                <a href="/dashboard" class="text-gray-600 hover:text-blue-600">Visão Geral</a>
+                <a href="/dashboard/analysis" class="text-gray-600 hover:text-blue-600">Análise de Anúncios</a>
+                <!-- Adicionar mais links aqui no futuro -->
+            </div>
+        </div>
+        <div class="flex items-center">
+            <span class="text-gray-600 mr-4 hidden sm:inline">Olá, <?php echo htmlspecialchars($_SESSION['user_email']); ?></span>
+            <a href="/logout" class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700">Sair</a>
+        </div>
+    </nav>
+</header>

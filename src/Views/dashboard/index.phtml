@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - MELI 360</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+    
+    <?php require_once BASE_PATH . '/src/Views/layouts/header.phtml'; ?>
+
+    <main class="container mx-auto px-4 lg:px-6 py-8">
+        <h1 class="text-2xl font-semibold text-gray-800 mb-6">Visão Geral</h1>
+
+        <div class="bg-white p-6 rounded-lg shadow-md">
+            <div class="flex justify-between items-center border-b pb-3 mb-4">
+                <h2 class="text-lg font-medium text-gray-900">Contas do Mercado Livre Conectadas</h2>
+                <a href="/dashboard/conectar/mercadolivre" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700">
+                    + Adicionar Nova Conta
+                </a>
+            </div>
+            
+            <?php if (isset($_GET['status']) && $_GET['status'] === 'ml_connected'): ?>
+                <div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-4" role="alert">
+                    <p class="font-bold">Sucesso!</p>
+                    <p>Uma nova conta do Mercado Livre foi conectada.</p>
+                </div>
+            <?php endif; ?>
+
+            <div class="space-y-4">
+                <?php if (empty($mlConnections)): ?>
+                    <div class="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4" role="alert">
+                        <p class="font-bold">Nenhuma conta conectada</p>
+                        <p>Clique em "Adicionar Nova Conta" para começar.</p>
+                    </div>
+                <?php else: ?>
+                    <?php foreach ($mlConnections as $connection): ?>
+                        <div class="border p-4 rounded-md flex justify-between items-center <?php echo $connection['is_active'] ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'; ?>">
+                            <div>
+                                <p class="font-semibold text-gray-800"><?php echo htmlspecialchars($connection['nickname']); ?></p>
+                                <p class="text-sm text-gray-600">ID Vendedor: <?php echo htmlspecialchars($connection['ml_user_id']); ?></p>
+                                <p class="text-xs text-gray-500">Status: <?php echo $connection['is_active'] ? 'Ativa' : 'Inativa'; ?></p>
+                            </div>
+                            <div>
+                                <!-- Futuros Botões de Ação -->
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </div>
+
+        </div>
+    </main>
+</body>
+</html>

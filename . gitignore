@@ -1,0 +1,16 @@
+# Arquivos de Configuração Sensíveis
+.env
+*.env.local
+*.env.*.local
+
+# Pasta de Dependências do Composer
+/vendor/
+
+# Arquivos de Log
+*.log
+logs/
+php_errors.log
+
+# Arquivos de Sistema Operacional
+.DS_Store
+Thumbs.db
