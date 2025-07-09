@@ -52,9 +52,17 @@ class Database
             $user = getenv('DB_USERNAME');
             $pass = getenv('DB_PASSWORD');
 
-            if ($host === false || $db === false || $user === false || $pass === false) {
-                error_log('Erro Crítico: As variáveis de ambiente do banco de dados não estão definidas no arquivo .env.');
-                throw new PDOException('Erro de configuração do servidor.');
+            $missingVars = [];
+            if ($host === false) $missingVars[] = 'DB_HOST';
+            if ($db === false)   $missingVars[] = 'DB_DATABASE';
+            if ($user === false) $missingVars[] = 'DB_USERNAME';
+            if ($pass === false) $missingVars[] = 'DB_PASSWORD';
+
+            if (!empty($missingVars)) {
+                $errorMessage = 'Erro Crítico: As seguintes variáveis de ambiente do banco de dados não foram definidas no arquivo .env: ' . implode(', ', $missingVars);
+                error_log($errorMessage);
+                // Lança uma exceção genérica para o usuário final por segurança.
+                throw new PDOException('Erro de configuração do servidor.', 500);
             }
 
             // String de Conexão (DSN - Data Source Name)

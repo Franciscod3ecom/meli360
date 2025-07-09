@@ -13,6 +13,9 @@ require_once __DIR__ . '/Helpers/encryption_helper.php';
 // Carrega o helper para renderização de views
 require_once __DIR__ . '/Helpers/view_helper.php';
 
+// Carrega o helper de CSRF
+require_once __DIR__ . '/Helpers/csrf_helper.php';
+
 // Carrega o helper de mensagens flash
 require_once __DIR__ . '/Helpers/flash_helper.php';
 

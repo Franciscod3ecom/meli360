@@ -13,6 +13,12 @@ try {
     die('O serviço está temporariamente indisponível devido a um erro de configuração.');
 }
 
+// Inicia a sessão em todas as requisições.
+// Deve ser chamado antes de qualquer output e depois de carregar as configurações.
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 // Carrega o arquivo de configuração central (que define BASE_PATH).
 require_once __DIR__ . '/../src/Core/config.php';
 
