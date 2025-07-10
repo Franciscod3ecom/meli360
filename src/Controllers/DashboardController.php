@@ -27,8 +27,11 @@ class DashboardController
         $anuncioModel = new Anuncio();
         $mlUserModel = new MercadoLivreUser();
 
-        // Busca todos os anúncios do usuário logado
+        // Busca todos os anúncios sincronizados para exibição
         $anuncios = $anuncioModel->findAllBySaasUserId($saasUserId);
+        
+        // Busca as contagens de anúncios por status para o progresso
+        $counts = $anuncioModel->countBySaasUserId($saasUserId);
         
         // Busca todas as conexões do Mercado Livre para o usuário logado
         $mlConnections = $mlUserModel->findAllBySaasUserId($saasUserId);
@@ -36,7 +39,8 @@ class DashboardController
         // Passa os dados para a view
         view('dashboard.analysis', [
             'anuncios' => $anuncios,
-            'mlConnections' => $mlConnections
+            'mlConnections' => $mlConnections,
+            'counts' => $counts
         ]);
     }
 }

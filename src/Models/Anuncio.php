@@ -26,50 +26,38 @@ class Anuncio
     }
 
     /**
-     * Busca todos os anúncios de um usuário específico, com paginação.
-     *
-     * @param int $saasUserId O ID do usuário da nossa plataforma.
-     * @param int $limit O número de registros por página.
-     * @param int $offset O deslocamento para a página.
-     * @return array Retorna um array de anúncios.
+     * Busca todos os anúncios sincronizados de um usuário da plataforma para exibição.
      */
-    public function findAllByUserId(int $saasUserId, int $limit = 50, int $offset = 0): array
+    public function findAllBySaasUserId(int $saasUserId): array
     {
-        $sql = "SELECT * FROM anuncios 
-                WHERE saas_user_id = :saas_user_id 
-                ORDER BY total_sales DESC, date_created DESC
-                LIMIT :limit OFFSET :offset";
-        
-        $stmt = $this->db->prepare($sql);
-        $stmt->bindValue(':saas_user_id', $saasUserId, PDO::PARAM_INT);
-        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-        $stmt->execute();
-        
+        $stmt = $this->db->prepare("SELECT * FROM anuncios WHERE saas_user_id = :saas_user_id AND sync_status = 1 ORDER BY status, title ASC");
+        $stmt->execute([':saas_user_id' => $saasUserId]);
         return $stmt->fetchAll();
     }
 
     /**
-     * Conta o número total de anúncios de um usuário.
-     *
-     * @param int $saasUserId O ID do usuário.
-     * @return int O total de anúncios.
+     * Conta o número total de anúncios de um usuário (sincronizados ou não).
      */
-    public function countByUserId(int $saasUserId): int
+    public function countBySaasUserId(int $saasUserId): array
     {
-        $stmt = $this->db->prepare("SELECT COUNT(*) FROM anuncios WHERE saas_user_id = :saas_user_id");
+        $stmt = $this->db->prepare("SELECT sync_status, COUNT(*) as count FROM anuncios WHERE saas_user_id = :saas_user_id GROUP BY sync_status");
         $stmt->execute([':saas_user_id' => $saasUserId]);
-        return (int) $stmt->fetchColumn();
+        return $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+    }
+
+    // --- MÉTODOS PARA FASE 1: COLETA DE IDS ---
+
+    /**
+     * Limpa todos os anúncios de um usuário do ML antes de uma nova sincronização.
+     */
+    public function clearAllByMlUserId(int $mlUserId): bool
+    {
+        $stmt = $this->db->prepare("DELETE FROM anuncios WHERE ml_user_id = :ml_user_id");
+        return $stmt->execute([':ml_user_id' => $mlUserId]);
     }
 
     /**
-     * Insere uma lista de IDs de anúncios no banco de dados, ignorando duplicados.
-     * Usado na fase inicial da sincronização para salvar todos os IDs rapidamente.
-     *
-     * @param int $saasUserId
-     * @param int $mlUserId
-     * @param array $itemIds Array de IDs de anúncios (ex: ['MLB123', 'MLB456']).
-     * @return int O número de linhas afetadas.
+     * Insere uma grande quantidade de IDs de anúncios de uma vez, ignorando duplicados.
      */
     public function bulkInsertIds(int $saasUserId, int $mlUserId, array $itemIds): int
     {
@@ -77,132 +65,143 @@ class Anuncio
             return 0;
         }
 
-        // Prepara uma query de inserção múltipla
-        $sql = "INSERT INTO anuncios (saas_user_id, ml_user_id, ml_item_id, sync_status) VALUES ";
+        $sql = "INSERT IGNORE INTO anuncios (ml_item_id, saas_user_id, ml_user_id, sync_status) VALUES ";
         $placeholders = [];
         $values = [];
-
         foreach ($itemIds as $itemId) {
             $placeholders[] = '(?, ?, ?, 0)';
+            $values[] = $itemId;
             $values[] = $saasUserId;
             $values[] = $mlUserId;
-            $values[] = $itemId;
         }
 
         $sql .= implode(', ', $placeholders);
-        // Adiciona a cláusula ON DUPLICATE KEY UPDATE para não fazer nada se o anúncio já existir,
-        // evitando erros de chave duplicada.
-        $sql .= " ON DUPLICATE KEY UPDATE ml_item_id = VALUES(ml_item_id)";
-
         $stmt = $this->db->prepare($sql);
         $stmt->execute($values);
-
         return $stmt->rowCount();
     }
 
-    // Futuramente, adicionaremos um método 'updateDetails' para preencher os outros campos
-    // após a sincronização detalhada de cada anúncio.
+    // --- MÉTODOS PARA FASE 2: DETALHAMENTO EM LOTES ---
+
     /**
-     * Atualiza os detalhes de um anúncio no banco de dados.
-     *
-     * @param string $mlItemId
-     * @param array $details Array com os detalhes vindos da API.
-     * @return bool
+     * Encontra um lote de anúncios que ainda não foram detalhados.
      */
-    public function updateDetails(string $mlItemId, array $details): bool
+    public function findAnunciosToDetail(int $limit = 20): array
     {
-        $sql = "UPDATE anuncios SET 
-                    title = :title,
-                    price = :price,
-                    stock = :stock,
-                    status = :status,
-                    permalink = :permalink,
-                    thumbnail = :thumbnail,
-                    date_created = :date_created,
-                    health = :health,
-                    category_id = :category_id,
-                    has_variations = :has_variations,
-                    shipping_mode = :shipping_mode,
-                    is_free_shipping = :is_free_shipping,
-                    sku = :sku,
-                    sync_status = 1, -- Marca como sincronizado
-                    last_sync_at = NOW()
+        $stmt = $this->db->prepare("SELECT * FROM anuncios WHERE sync_status = 0 AND (last_sync_attempt IS NULL OR last_sync_attempt < NOW() - INTERVAL 1 HOUR) LIMIT :limit");
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Encontra um lote de anúncios prontos para a análise profunda (frete, etc.).
+     */
+    public function findAnunciosToAnalyze(int $limit = 10): array
+    {
+        // Pega anúncios com status 1 (Detalhes Básicos OK)
+        $stmt = $this->db->prepare("SELECT ml_item_id, category_id FROM anuncios WHERE sync_status = 1 AND (last_sync_attempt IS NULL OR last_sync_attempt < NOW() - INTERVAL 1 HOUR) LIMIT :limit");
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Atualiza um anúncio com os dados da análise profunda (frete, categoria).
+     */
+    public function updateDeepAnalysis(string $mlItemId, ?string $shippingData, ?string $categoryData): bool
+    {
+        $sql = "UPDATE anuncios SET
+                    shipping_data = :shipping_data,
+                    category_data = :category_data,
+                    sync_status = 2, -- Marca como Análise Profunda OK
+                    last_sync_attempt = NOW()
                 WHERE ml_item_id = :ml_item_id";
         
         $stmt = $this->db->prepare($sql);
-        
         return $stmt->execute([
-            ':title' => $details['title'],
-            ':price' => $details['price'],
-            ':stock' => $details['available_quantity'],
-            ':status' => $details['status'],
-            ':permalink' => $details['permalink'],
-            ':thumbnail' => $details['thumbnail'],
-            ':date_created' => (new \DateTime($details['date_created']))->format('Y-m-d H:i:s'),
-            ':health' => $details['health'],
-            ':category_id' => $details['category_id'],
-            ':has_variations' => !empty($details['variations']),
-            ':shipping_mode' => $details['shipping']['mode'] ?? 'not_specified',
-            ':is_free_shipping' => $details['shipping']['free_shipping'] ?? 0,
-            ':sku' => $details['seller_custom_field'],
-            ':ml_item_id' => $mlItemId,
+            ':shipping_data' => $shippingData,
+            ':category_data' => $categoryData,
+            ':ml_item_id' => $mlItemId
         ]);
     }
 
     /**
-     * Salva ou atualiza um anúncio no banco de dados.
-     *
-     * @param array $itemData Os dados do anúncio vindos da API do Mercado Livre.
-     * @return bool Retorna true em caso de sucesso, false em caso de falha.
+     * Atualiza os detalhes de múltiplos anúncios de uma vez.
      */
-    public function saveOrUpdate(array $itemData): bool
+    public function bulkUpdateDetails(array $itemsData): int
     {
-        $sql = "INSERT INTO anuncios (ml_item_id, saas_user_id, ml_user_id, title, price, status, permalink, thumbnail, data)
-                VALUES (:ml_item_id, :saas_user_id, :ml_user_id, :title, :price, :status, :permalink, :thumbnail, :data)
-                ON DUPLICATE KEY UPDATE
-                    title = VALUES(title),
-                    price = VALUES(price),
-                    status = VALUES(status),
-                    permalink = VALUES(permalink),
-                    thumbnail = VALUES(thumbnail),
-                    data = VALUES(data),
-                    updated_at = NOW()";
-
-        $stmt = $this->db->prepare($sql);
-
-        // Precisamos encontrar o saas_user_id a partir do ml_user_id
-        $mlUserModel = new MercadoLivreUser();
-        $mlUser = $mlUserModel->findByMlUserId($itemData['seller_id']);
-        $saasUserId = $mlUser ? $mlUser['saas_user_id'] : null;
-
-        if (!$saasUserId) {
-            log_message("Não foi possível encontrar o saas_user_id para o ml_user_id " . $itemData['seller_id'] . " ao salvar o anúncio " . $itemData['id'], "WARNING");
-            return false;
+        if (empty($itemsData)) {
+            return 0;
         }
 
-        return $stmt->execute([
-            ':ml_item_id' => $itemData['id'],
-            ':saas_user_id' => $saasUserId,
-            ':ml_user_id' => $itemData['seller_id'],
-            ':title' => $itemData['title'],
-            ':price' => $itemData['price'],
-            ':status' => $itemData['status'],
-            ':permalink' => $itemData['permalink'],
-            ':thumbnail' => $itemData['thumbnail'],
-            ':data' => json_encode($itemData) // Salva o JSON completo para futuras análises
-        ]);
+        $updatedCount = 0;
+        $sql = "UPDATE anuncios SET
+                    title = :title,
+                    price = :price,
+                    status = :status,
+                    permalink = :permalink,
+                    thumbnail = :thumbnail,
+                    data = :data,
+                    sync_status = 1,
+                    last_sync_attempt = NOW()
+                WHERE ml_item_id = :ml_item_id";
+        
+        $stmt = $this->db->prepare($sql);
+
+        foreach ($itemsData as $item) {
+            // Verifica se a API retornou o corpo do item com sucesso
+            if (isset($item['code']) && $item['code'] === 200 && isset($item['body'])) {
+                $body = $item['body'];
+                $success = $stmt->execute([
+                    ':title' => $body['title'],
+                    ':price' => $body['price'],
+                    ':status' => $body['status'],
+                    ':permalink' => $body['permalink'],
+                    ':thumbnail' => $body['thumbnail'],
+                    ':data' => json_encode($body),
+                    ':ml_item_id' => $body['id']
+                ]);
+                if ($success) {
+                    $updatedCount++;
+                }
+            } else {
+                // Se houve erro na API para este item específico, marca como falho
+                $itemId = $item['body']['id'] ?? null;
+                if ($itemId) {
+                    $this->markAsFailed($itemId);
+                }
+            }
+        }
+        return $updatedCount;
     }
-    
+
     /**
-     * Busca todos os anúncios de um usuário da plataforma.
-     *
-     * @param int $saasUserId O ID do usuário na nossa plataforma.
-     * @return array
+     * Marca um anúncio como falho para evitar retentativas constantes.
      */
-    public function findAllBySaasUserId(int $saasUserId): array
+    public function markAsFailed(string $mlItemId): bool
     {
-        $stmt = $this->db->prepare("SELECT * FROM anuncios WHERE saas_user_id = :saas_user_id ORDER BY status, title ASC");
-        $stmt->execute([':saas_user_id' => $saasUserId]);
-        return $stmt->fetchAll();
+        $stmt = $this->db->prepare("UPDATE anuncios SET sync_status = 9, last_sync_attempt = NOW() WHERE ml_item_id = :ml_item_id");
+        return $stmt->execute([':ml_item_id' => $mlItemId]);
+    }
+
+    /**
+     * Busca um anúncio específico pelo seu ID do Mercado Livre.
+     *
+     * @param string $mlItemId
+     * @return array|false
+     */
+    public function findByMlItemId(string $mlItemId): array|false
+    {
+        $stmt = $this->db->prepare("SELECT * FROM anuncios WHERE ml_item_id = :ml_item_id LIMIT 1");
+        $stmt->execute([':ml_item_id' => $mlItemId]);
+        $anuncio = $stmt->fetch();
+
+        // Se a coluna 'data' contiver um JSON, decodifica para um array.
+        if ($anuncio && !empty($anuncio['data'])) {
+            $anuncio['data'] = json_decode($anuncio['data'], true);
+        }
+
+        return $anuncio;
     }
 }

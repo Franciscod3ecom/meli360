@@ -103,13 +103,10 @@ class AuthController
             ->validate('email', 'required', 'O campo e-mail é obrigatório.')
             ->validate('email', 'email', 'Por favor, insira um e-mail válido.')
             ->validate('password', 'required', 'O campo senha é obrigatório.')
-            ->validate('password', 'min:8', 'A senha deve ter no mínimo 8 caracteres.')
-            ->validate('password_confirmation', 'matches:password', 'As senhas não coincidem.');
+            ->validate('password', 'password_strength', 'A senha deve ter no mínimo 8 caracteres, com letras e números.');
 
         if ($validator->fails()) {
-            set_flash_message('register_error', $validator->getFirstError());
-            // Salvar os dados do formulário (exceto senhas) para repopular
-            $_SESSION['form_data'] = ['name' => $_POST['name'], 'email' => $_POST['email']];
+            set_flash_message('register_error', $validator->getFirstError()); // Use uma chave diferente para a página de registro
             header('Location: /register');
             exit;
         }
@@ -118,11 +115,11 @@ class AuthController
         $email = $_POST['email'];
         $password = $_POST['password'];
 
-        // 2. Verifica se o e-mail já está em uso
         $userModel = new User();
+
+        // 2. Verifica se o email já está em uso
         if ($userModel->findByEmail($email)) {
-            set_flash_message('register_error', 'Este e-mail já está cadastrado.');
-            $_SESSION['form_data'] = ['name' => $name, 'email' => $email];
+            set_flash_message('register_error', 'Este endereço de e-mail já está em uso.');
             header('Location: /register');
             exit;
         }
@@ -131,52 +128,32 @@ class AuthController
         $passwordHash = password_hash($password, PASSWORD_DEFAULT);
 
         // 4. Cria o usuário no banco de dados
-        $userId = $userModel->create($name, $email, $passwordHash);
+        $newUserId = $userModel->create($name, $email, $passwordHash);
 
-        if ($userId) {
-            // 5. Cria a sessão do usuário
-            $this->createUserSession($userId, $email, 'user'); // 'user' como role padrão
-
-            // 6. Redireciona para o dashboard
+        if ($newUserId) {
+            // Sucesso! Loga o usuário recém-criado automaticamente e redireciona.
+            $this->createUserSession($newUserId, $email, 'user'); // Papel padrão
+            set_flash_message('dashboard_status', 'Registro realizado com sucesso! Bem-vindo(a).', 'success');
             header('Location: /dashboard');
             exit;
         } else {
+            // Erro ao criar usuário no banco.
             set_flash_message('register_error', 'Ocorreu um erro ao criar sua conta. Tente novamente.');
-            $_SESSION['form_data'] = ['name' => $name, 'email' => $email];
             header('Location: /register');
             exit;
         }
     }
 
     /**
-     * Cria a sessão para um usuário autenticado.
-     *
-     * @param int $id O ID do usuário.
-     * @param string $email O email do usuário.
-     * @param string $role O papel (role) do usuário.
-     * @return void
-     */
-    protected function createUserSession(int $id, string $email, string $role): void
-    {
-        // Regenera o ID da sessão para prevenir ataques de session fixation.
-        session_regenerate_id(true);
-
-        $_SESSION['user_id'] = $id;
-        $_SESSION['user_email'] = $email;
-        $_SESSION['user_role'] = $role;
-        $_SESSION['logged_in'] = true;
-    }
-
-    /**
-     * Faz o logout do usuário, destruindo sua sessão.
+     * Realiza o logout do usuário, destruindo a sessão.
      * @return void
      */
     public function logout(): void
     {
-        // Limpa todas as variáveis de sessão.
+        // Limpa todas as variáveis de sessão
         $_SESSION = [];
 
-        // Destrói a sessão.
+        // Destrói o cookie de sessão
         if (ini_get("session.use_cookies")) {
             $params = session_get_cookie_params();
             setcookie(session_name(), '', time() - 42000,
@@ -185,11 +162,28 @@ class AuthController
             );
         }
 
+        // Finalmente, destrói a sessão.
         session_destroy();
 
         // Redireciona para a página de login com uma mensagem de sucesso.
-        set_flash_message('logout_success', 'Você saiu com sucesso.');
+        set_flash_message('auth_success', 'Você foi desconectado com sucesso.', 'success');
         header('Location: /login');
         exit;
+    }
+
+    /**
+     * Inicia a sessão para um usuário.
+     *
+     * @param int $id O ID do usuário.
+     * @param string $email O email do usuário.
+     * @param string $role O papel (role) do usuário.
+     */
+    private function createUserSession(int $id, string $email, string $role): void
+    {
+        generate_csrf_token(true); // Força a regeneração do token CSRF para a nova sessão.
+        session_regenerate_id(true); // Previne session fixation
+        $_SESSION['user_id'] = $id;
+        $_SESSION['user_email'] = $email;
+        $_SESSION['user_role'] = $role;
     }
 }
