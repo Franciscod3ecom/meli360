@@ -102,7 +102,7 @@ class Anuncio
 
     // Futuramente, adicionaremos um método 'updateDetails' para preencher os outros campos
     // após a sincronização detalhada de cada anúncio.
-/**
+    /**
      * Atualiza os detalhes de um anúncio no banco de dados.
      *
      * @param string $mlItemId
@@ -147,5 +147,62 @@ class Anuncio
             ':sku' => $details['seller_custom_field'],
             ':ml_item_id' => $mlItemId,
         ]);
+    }
+
+    /**
+     * Salva ou atualiza um anúncio no banco de dados.
+     *
+     * @param array $itemData Os dados do anúncio vindos da API do Mercado Livre.
+     * @return bool Retorna true em caso de sucesso, false em caso de falha.
+     */
+    public function saveOrUpdate(array $itemData): bool
+    {
+        $sql = "INSERT INTO anuncios (ml_item_id, saas_user_id, ml_user_id, title, price, status, permalink, thumbnail, data)
+                VALUES (:ml_item_id, :saas_user_id, :ml_user_id, :title, :price, :status, :permalink, :thumbnail, :data)
+                ON DUPLICATE KEY UPDATE
+                    title = VALUES(title),
+                    price = VALUES(price),
+                    status = VALUES(status),
+                    permalink = VALUES(permalink),
+                    thumbnail = VALUES(thumbnail),
+                    data = VALUES(data),
+                    updated_at = NOW()";
+
+        $stmt = $this->db->prepare($sql);
+
+        // Precisamos encontrar o saas_user_id a partir do ml_user_id
+        $mlUserModel = new MercadoLivreUser();
+        $mlUser = $mlUserModel->findByMlUserId($itemData['seller_id']);
+        $saasUserId = $mlUser ? $mlUser['saas_user_id'] : null;
+
+        if (!$saasUserId) {
+            log_message("Não foi possível encontrar o saas_user_id para o ml_user_id " . $itemData['seller_id'] . " ao salvar o anúncio " . $itemData['id'], "WARNING");
+            return false;
+        }
+
+        return $stmt->execute([
+            ':ml_item_id' => $itemData['id'],
+            ':saas_user_id' => $saasUserId,
+            ':ml_user_id' => $itemData['seller_id'],
+            ':title' => $itemData['title'],
+            ':price' => $itemData['price'],
+            ':status' => $itemData['status'],
+            ':permalink' => $itemData['permalink'],
+            ':thumbnail' => $itemData['thumbnail'],
+            ':data' => json_encode($itemData) // Salva o JSON completo para futuras análises
+        ]);
+    }
+    
+    /**
+     * Busca todos os anúncios de um usuário da plataforma.
+     *
+     * @param int $saasUserId O ID do usuário na nossa plataforma.
+     * @return array
+     */
+    public function findAllBySaasUserId(int $saasUserId): array
+    {
+        $stmt = $this->db->prepare("SELECT * FROM anuncios WHERE saas_user_id = :saas_user_id ORDER BY status, title ASC");
+        $stmt->execute([':saas_user_id' => $saasUserId]);
+        return $stmt->fetchAll();
     }
 }

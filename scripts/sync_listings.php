@@ -1,96 +1,133 @@
 <?php
-// Bloco de inicialização robusto
-error_reporting(E_ALL);
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
+// scripts/sync_listings.php
 
-define('BASE_PATH', realpath(__DIR__ . '/../') . '/');
-require_once BASE_PATH . 'vendor/autoload.php';
-require_once BASE_PATH . 'src/Helpers/log_helper.php';
+// Define um limite de tempo maior para o script, pois a sincronização pode demorar.
+set_time_limit(3600); // 1 hora
 
-try {
-    $dotenv = Dotenv\Dotenv::createImmutable(BASE_PATH);
-    $dotenv->load();
-} catch (\Exception $e) {
-    error_log("CRON_FATAL: .env não encontrado. " . $e->getMessage());
+// Garante que o script só seja executado via CLI
+if (php_sapi_name() !== 'cli') {
+    die("Este script só pode ser executado a partir da linha de comando.");
+}
+
+// Inclui o autoloader e a configuração inicial
+require_once dirname(__DIR__) . '/vendor/autoload.php';
+require_once dirname(__DIR__) . '/src/Core/config.php';
+
+// Inclui os helpers necessários
+require_once dirname(__DIR__) . '/src/helpers.php';
+
+
+use App\Models\MercadoLivreUser;
+use App\Models\Anuncio;
+
+// Validação do argumento da linha de comando
+if (!isset($argv[1]) || !is_numeric($argv[1])) {
+    log_message("Erro de execução: ML User ID não fornecido ou inválido.", "ERROR");
     exit(1);
 }
 
-use App\Core\Database;
-use App\Models\Anuncio;
-use App\Models\MercadoLivreUser;
-use App\Models\MercadoLivreApi;
+$mlUserId = (int) $argv[1];
 
-$lockFile = sys_get_temp_dir() . '/meli360_sync.lock';
-$lockHandle = fopen($lockFile, 'c');
-if (!flock($lockHandle, LOCK_EX | LOCK_NB)) {
-    log_message("SYNC_CRON: Outro processo já em andamento.", "INFO");
-    exit;
-}
+log_message("Iniciando sincronização para ML User ID: {$mlUserId}", "INFO");
 
-log_message("SYNC_CRON: --- Iniciando ciclo ---");
-$mlUserId = null;
+$mlUserModel = new MercadoLivreUser();
+$anuncioModel = new Anuncio();
 
 try {
-    $pdo = Database::getInstance();
-    $mlUserModel = new MercadoLivreUser();
-    
-    log_message("SYNC_CRON: [PASSO 1/7] Buscando conta com status 'REQUESTED'...");
-    $stmt = $pdo->prepare("SELECT * FROM mercadolibre_users WHERE sync_status = 'REQUESTED' ORDER BY updated_at ASC LIMIT 1");
-    $stmt->execute();
-    $connection = $stmt->fetch();
+    // 1. Atualiza o status para 'RUNNING'
+    $mlUserModel->updateSyncStatusByMlUserId($mlUserId, 'RUNNING', 'A sincronização está em andamento.');
 
-    if (!$connection) {
-        log_message("SYNC_CRON: [INFO] Nenhuma conta na fila.");
-        exit;
-    }
-    
-    $saasUserId = $connection['saas_user_id'];
-    $mlUserId = $connection['ml_user_id'];
-    log_message("SYNC_CRON: [PASSO 2/7] Conta encontrada! Processando ML User ID: {$mlUserId}");
-
-    $mlUserModel->updateSyncStatusByMlUserId($mlUserId, 'SYNCING', 'Iniciando busca de IDs...');
-    log_message("SYNC_CRON: [PASSO 3/7] Status da conta {$mlUserId} alterado para 'SYNCING'.");
-
+    // 2. Obter um token de acesso válido (que se auto-renova se necessário)
     $accessToken = $mlUserModel->getValidAccessToken($mlUserId);
     if (!$accessToken) {
-        throw new Exception("Falha ao obter Access Token para o ML User ID {$mlUserId}.");
-    }
-    log_message("SYNC_CRON: [PASSO 4/7] Access Token obtido para ML User ID: {$mlUserId}");
-
-    $mlApi = new MercadoLivreApi();
-    $apiResult = $mlApi->getAllItemIds($mlUserId, $accessToken);
-    if ($apiResult['error']) {
-        throw new Exception("Erro da API do ML: " . $apiResult['error']);
-    }
-    log_message("SYNC_CRON: [PASSO 5/7] API do ML consultada.");
-
-    $allItemIds = $apiResult['item_ids'];
-    $totalFound = is_array($allItemIds) ? count($allItemIds) : 0;
-    log_message("SYNC_CRON: [PASSO 6/7] API retornou {$totalFound} IDs para ML User ID: {$mlUserId}.");
-    
-    $anuncioModel = new Anuncio();
-    $pdo->prepare("DELETE FROM anuncios WHERE ml_user_id = ?")->execute([$mlUserId]);
-    
-    if ($totalFound > 0) {
-        $anuncioModel->bulkInsertIds($saasUserId, $mlUserId, $allItemIds);
-        $message = "{$totalFound} anúncios encontrados. Fase 1 (IDs) concluída.";
-        $mlUserModel->updateSyncStatusByMlUserId($mlUserId, 'SYNCING', $message); // MUDANÇA: Mantém SYNCING para a próxima fase
-    } else {
-        $mlUserModel->updateSyncStatusByMlUserId($mlUserId, 'COMPLETED', 'Nenhum anúncio ativo encontrado.');
+        throw new Exception("Não foi possível obter um token de acesso válido.");
     }
 
-    log_message("SYNC_CRON: [PASSO 7/7] Sincronização de IDs para ML User ID {$mlUserId} finalizada.");
+    // 3. Loop de paginação para buscar todos os anúncios
+    $limit = 50;
+    $offset = 0;
+    $total = null;
+    $processedCount = 0;
 
-} catch (\Throwable $e) {
-    $errorMsg = "SYNC_CRON: ERRO FATAL: " . $e->getMessage();
-    log_message($errorMsg, "ERROR");
-    if ($mlUserId) {
-        $mlUserModel = $mlUserModel ?? new MercadoLivreUser();
-        $mlUserModel->updateSyncStatusByMlUserId($mlUserId, 'ERROR', 'Erro fatal no script de sincronização.');
-    }
-} finally {
-    flock($lockHandle, LOCK_UN);
-    fclose($lockHandle);
-    log_message("SYNC_CRON: --- Ciclo finalizado ---");
+    do {
+        $apiUrl = "https://api.mercadolibre.com/users/{$mlUserId}/items/search?limit={$limit}&offset={$offset}";
+        
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $apiUrl,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => ["Authorization: Bearer {$accessToken}"]
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode !== 200) {
+            throw new Exception("Falha ao buscar anúncios da API do ML. HTTP Code: {$httpCode}. Resposta: {$response}");
+        }
+
+        $data = json_decode($response, true);
+        if (!isset($data['results'])) {
+            throw new Exception("Formato de resposta inesperado da API do ML.");
+        }
+
+        if ($total === null) {
+            $total = $data['paging']['total'];
+            log_message("Total de anúncios encontrados para ML User ID {$mlUserId}: {$total}", "INFO");
+        }
+
+        $listingIds = $data['results'];
+        if (empty($listingIds)) {
+            break; // Sai do loop se não houver mais resultados
+        }
+
+        // 4. Buscar detalhes de cada anúncio em lote (respeitando o limite de 20 da API)
+        $idChunks = array_chunk($listingIds, 20);
+
+        foreach ($idChunks as $chunk) {
+            $detailsUrl = "https://api.mercadolibre.com/items?ids=" . implode(',', $chunk);
+            
+            $ch_details = curl_init();
+            curl_setopt_array($ch_details, [
+                CURLOPT_URL => $detailsUrl,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER => ["Authorization: Bearer {$accessToken}"]
+            ]);
+            $detailsResponse = curl_exec($ch_details);
+            $detailsHttpCode = curl_getinfo($ch_details, CURLINFO_HTTP_CODE);
+            curl_close($ch_details);
+
+            if ($detailsHttpCode !== 200) {
+                log_message("Falha ao buscar detalhes dos anúncios. HTTP Code: {$detailsHttpCode}. Resposta: {$detailsResponse}", "WARNING");
+                continue; // Pula para o próximo chunk
+            }
+
+            $detailsData = json_decode($detailsResponse, true);
+
+            // 5. Salvar cada anúncio no banco de dados
+            foreach ($detailsData as $item) {
+                if (isset($item['code']) && $item['code'] === 200 && isset($item['body'])) {
+                    $anuncioModel->saveOrUpdate($item['body']);
+                    $processedCount++;
+                }
+            }
+        }
+        
+        log_message("Processados {$processedCount} de {$total} anúncios para ML User ID {$mlUserId}...", "INFO");
+        $offset += $limit;
+
+    } while ($offset < $total);
+
+    // 6. Atualiza o status para 'COMPLETED'
+    $successMessage = "Sincronização concluída com sucesso. {$processedCount} anúncios foram processados.";
+    $mlUserModel->updateSyncStatusByMlUserId($mlUserId, 'COMPLETED', $successMessage);
+    log_message($successMessage, "INFO");
+
+} catch (Exception $e) {
+    $errorMessage = "Erro durante a sincronização para ML User ID {$mlUserId}: " . $e->getMessage();
+    log_message($errorMessage, "ERROR");
+    $mlUserModel->updateSyncStatusByMlUserId($mlUserId, 'FAILED', $e->getMessage());
+    exit(1);
 }
+
+exit(0);

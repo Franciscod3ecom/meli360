@@ -100,24 +100,30 @@ class MercadoLivreController
             header('Location: /dashboard/analysis?status=invalid_request');
             exit;
         }
+
         $mlUserId = (int)$_GET['ml_user_id'];
-        $saasUserId = $_SESSION['user_id'];
-
-        $mlUserModel = new MercadoLivreUser();
         
-        $connection = $mlUserModel->findByMlUserId($mlUserId);
-        if (!$connection || $connection['saas_user_id'] != $saasUserId) {
-            header('Location: /dashboard/analysis?status=permission_denied');
-            exit;
-        }
-
-        $success = $mlUserModel->updateSyncStatusByMlUserId($mlUserId, 'REQUESTED', 'Sincronização solicitada pelo usuário.');
+        // Caminho absoluto para o script de sincronização
+        $scriptPath = BASE_PATH . '/scripts/sync_listings.php';
         
-        if ($success) {
-            header('Location: /dashboard/analysis?status=sync_requested');
+        // Comando para executar o script em segundo plano
+        $command = "php {$scriptPath} {$mlUserId}";
+
+        // Lógica para executar em segundo plano de forma compatível com Windows e Linux/macOS
+        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+            // No Windows, pclose(popen("start /B " . $command, "r")); é uma forma de iniciar sem esperar
+            pclose(popen("start /B " . $command, "r"));
         } else {
-            header('Location: /dashboard/analysis?status=sync_request_failed');
+            // Em Linux/macOS, adicionar ' > /dev/null 2>&1 &' no final executa em segundo plano
+            exec($command . " > /dev/null 2>&1 &");
         }
+
+        // Atualiza o status para 'QUEUED' (na fila)
+        $mlUserModel = new MercadoLivreUser();
+        $mlUserModel->updateSyncStatusByMlUserId($mlUserId, 'QUEUED', 'A sincronização foi colocada na fila e começará em breve.');
+
+        // Redireciona de volta para a página de análise com uma mensagem de sucesso
+        header('Location: /dashboard/analysis?status=sync_started');
         exit;
     }
 }

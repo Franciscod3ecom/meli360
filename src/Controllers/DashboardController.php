@@ -27,18 +27,16 @@ class DashboardController
         $anuncioModel = new Anuncio();
         $mlUserModel = new MercadoLivreUser();
 
-        $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-        $limit = 50;
-        $offset = ($page > 0) ? ($page - 1) * $limit : 0;
-
-        $anuncios = $anuncioModel->findAllByUserId($saasUserId, $limit, $offset);
-        $totalAnuncios = $anuncioModel->countByUserId($saasUserId);
-        $totalPages = ceil($totalAnuncios / $limit);
+        // Busca todos os anúncios do usuário logado
+        $anuncios = $anuncioModel->findAllBySaasUserId($saasUserId);
         
+        // Busca todas as conexões do Mercado Livre para o usuário logado
         $mlConnections = $mlUserModel->findAllBySaasUserId($saasUserId);
-        $syncStatus = $mlConnections[0]['sync_status'] ?? 'IDLE';
-        $syncMessage = $mlConnections[0]['sync_last_message'] ?? '';
 
-        require_once BASE_PATH . '/src/Views/dashboard/analysis.phtml';
+        // Passa os dados para a view
+        view('dashboard.analysis', [
+            'anuncios' => $anuncios,
+            'mlConnections' => $mlConnections
+        ]);
     }
 }
