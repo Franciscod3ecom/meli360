@@ -58,4 +58,22 @@ class Subscription
             ':id' => $subscriptionId
         ]);
     }
+
+    /**
+     * Verifica se um usuário tem uma assinatura ativa.
+     *
+     * @param int $saasUserId
+     * @return bool
+     */
+    public function isActive(int $saasUserId): bool
+    {
+        $stmt = $this->db->prepare(
+            "SELECT id FROM subscriptions 
+             WHERE saas_user_id = :saas_user_id 
+             AND status = 'active' 
+             AND expires_at >= CURDATE()"
+        );
+        $stmt->execute([':saas_user_id' => $saasUserId]);
+        return $stmt->fetch() !== false;
+    }
 }

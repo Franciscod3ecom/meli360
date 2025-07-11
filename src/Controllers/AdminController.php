@@ -2,43 +2,37 @@
 namespace App\Controllers;
 
 use App\Models\User;
+use App\Models\Anuncio;
 
 class AdminController
 {
     /**
      * Exibe o dashboard principal da área administrativa.
-     * Lista todos os usuários e suas conexões.
      */
-    public function index(): void
+    public function dashboard(): void
     {
         $userModel = new User();
-        // Este método buscará todos os usuários e seus dados de conexão ML
         $users = $userModel->getAllUsersWithConnections();
-
         view('admin.dashboard', ['users' => $users]);
     }
 
     /**
      * Exibe os detalhes de um usuário específico para gerenciamento.
-     *
-     * @param int $id O ID do usuário (saas_user_id).
      */
-    public function showUserDetails(int $id): void
+    public function viewUser(int $userId): void
     {
         $userModel = new User();
-        $anuncioModel = new \App\Models\Anuncio();
+        $anuncioModel = new Anuncio();
 
-        $user = $userModel->findById($id);
-
+        $user = $userModel->findById($userId);
         if (!$user) {
-            set_flash_message('admin_error', 'Usuário não encontrado.');
             header('Location: /admin/dashboard');
             exit;
         }
 
-        $anuncios = $anuncioModel->findAllBySaasUserId($id);
+        $anuncios = $anuncioModel->findAllBySaasUserId($userId);
         $consultants = $userModel->getConsultants();
-        $assignedConsultant = $userModel->getAssignedConsultant($id);
+        $assignedConsultant = $userModel->getAssignedConsultant($userId);
 
         view('admin.user_details', [
             'user' => $user,
@@ -49,9 +43,43 @@ class AdminController
     }
 
     /**
+     * Inicia a personificação de um usuário.
+     */
+    public function impersonateStart(int $userId): void
+    {
+        $userModel = new User();
+        $targetUser = $userModel->findById($userId);
+
+        if ($targetUser && $_SESSION['user_role'] === 'admin') {
+            $_SESSION['original_user'] = [
+                'user_id' => $_SESSION['user_id'],
+                'user_email' => $_SESSION['user_email'],
+                'user_role' => $_SESSION['user_role'],
+            ];
+            (new AuthController())->createUserSession($targetUser['id'], $targetUser['email'], $targetUser['role']);
+            header('Location: /dashboard');
+            exit;
+        }
+        header('Location: /admin/dashboard');
+        exit;
+    }
+
+    /**
+     * Para a sessão de personificação.
+     */
+    public function impersonateStop(): void
+    {
+        if (isset($_SESSION['original_user'])) {
+            $originalUser = $_SESSION['original_user'];
+            (new AuthController())->createUserSession($originalUser['user_id'], $originalUser['user_email'], $originalUser['user_role']);
+            unset($_SESSION['original_user']);
+        }
+        header('Location: /admin/dashboard');
+        exit;
+    }
+
+    /**
      * Atualiza os dados de um usuário (role, consultor, etc.).
-     *
-     * @param int $id O ID do usuário a ser atualizado.
      */
     public function updateUser(int $id): void
     {
@@ -63,13 +91,11 @@ class AdminController
 
         $userModel = new User();
         
-        // Atualiza a Role
         $newRole = $_POST['role'];
         if (in_array($newRole, ['user', 'consultant', 'admin'])) {
             $userModel->updateUserRole($id, $newRole);
         }
 
-        // Atualiza a associação do consultor
         $consultantId = $_POST['consultant_id'];
         if ($consultantId === 'none') {
             $userModel->unassignConsultant($id);
@@ -81,27 +107,17 @@ class AdminController
         header('Location: /admin/user/' . $id);
         exit;
     }
-    
+
     /**
      * Executa manualmente o script de sincronização de anúncios.
-     * Esta rota deve ser protegida para ser acessível apenas por administradores.
-     *
-     * @return void
      */
     public function triggerSync(): void
     {
-        // Define um cabeçalho para que o navegador exiba o texto como pré-formatado
         header('Content-Type: text/plain; charset=utf-8');
-
         echo "========================================\n";
         echo " EXECUTANDO SINCRONIZAÇÃO MANUALMENTE \n";
         echo "========================================\n\n";
-
-        // Altera o limite de tempo de execução para o script não parar no meio
-        set_time_limit(300); // 5 minutos
-
-        // Usa 'include' para executar o script de cron como se estivéssemos na linha de comando.
-        // Toda a saída (echos) do script será exibida na tela do navegador.
+        set_time_limit(300);
         try {
             include_once BASE_PATH . '/scripts/sync_listings.php';
         } catch (\Exception $e) {
@@ -112,7 +128,6 @@ class AdminController
             echo "Arquivo: " . $e->getFile() . "\n";
             echo "Linha: " . $e->getLine() . "\n";
         }
-
         echo "\n\n--- Execução manual finalizada ---";
     }
 }

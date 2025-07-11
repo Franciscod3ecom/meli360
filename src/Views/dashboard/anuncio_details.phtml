@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detalhes do Anúncio - MELI 360</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        /* Estilo para o JSON formatado */
+        pre {
+            background-color: #1E293B; /* bg-slate-800 */
+            color: #E2E8F0; /* text-slate-200 */
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+
+    <?php require_once BASE_PATH . '/src/Views/layouts/header.phtml'; ?>
+
+    <main class="container mx-auto px-4 lg:px-6 py-8">
+        <a href="/dashboard/analysis" class="text-blue-600 hover:underline mb-6 inline-block"><i class="fas fa-arrow-left mr-2"></i> Voltar para Análise</a>
+
+        <?php if (isset($error)): ?>
+            <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md" role="alert">
+                <p class="font-bold">Erro</p>
+                <p><?= htmlspecialchars($error); ?></p>
+            </div>
+        <?php elseif (isset($anuncio)): ?>
+            <!-- Cabeçalho do Anúncio -->
+            <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+                <div class="flex flex-col md:flex-row items-start">
+                    <img class="h-24 w-24 rounded-lg object-cover mb-4 md:mb-0 md:mr-6" src="<?= htmlspecialchars($anuncio['thumbnail']); ?>" alt="Thumbnail do anúncio">
+                    <div class="flex-grow">
+                        <h1 class="text-2xl font-bold text-gray-800"><?= htmlspecialchars($anuncio['title']); ?></h1>
+                        <p class="text-lg text-gray-600 mt-1">R$ <?= number_format($anuncio['price'], 2, ',', '.'); ?></p>
+                        <div class="flex items-center space-x-4 mt-2 text-sm text-gray-500">
+                            <span>ID: <span class="font-semibold text-gray-700"><?= htmlspecialchars($anuncio['ml_item_id']); ?></span></span>
+                            <span>SKU: <span class="font-semibold text-gray-700"><?= htmlspecialchars($anuncio['sku'] ?? 'N/A'); ?></span></span>
+                            <span>Status: <span class="font-semibold capitalize text-gray-700"><?= htmlspecialchars($anuncio['status']); ?></span></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Grid de Detalhes -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Coluna de Análise -->
+                <div class="lg:col-span-2 space-y-6">
+                    <!-- Análise de Categoria -->
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-700"><i class="fas fa-tags mr-2"></i> Análise de Categoria</h2>
+                        <?php 
+                            $categoryData = json_decode($anuncio['category_data'] ?? '{}', true);
+                        ?>
+                        <p><strong>Nome:</strong> <?= htmlspecialchars($categoryData['name'] ?? 'Não disponível'); ?></p>
+                        <p><strong>ID da Categoria:</strong> <?= htmlspecialchars($anuncio['category_id']); ?></p>
+                        <p><strong>Caminho:</strong> 
+                            <?php 
+                                if (!empty($categoryData['path_from_root'])) {
+                                    echo implode(' > ', array_column($categoryData['path_from_root'], 'name'));
+                                } else {
+                                    echo 'N/A';
+                                }
+                            ?>
+                        </p>
+                    </div>
+
+                    <!-- Análise de Frete -->
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-700"><i class="fas fa-truck mr-2"></i> Análise de Frete</h2>
+                        <?php 
+                            $shippingData = json_decode($anuncio['shipping_data'] ?? '{}', true);
+                        ?>
+                        <p><strong>Modo de Envio:</strong> <span class="capitalize"><?= htmlspecialchars($anuncio['shipping_mode'] ?? 'N/A'); ?></span></p>
+                        <p><strong>Tipo de Logística:</strong> <span class="capitalize"><?= str_replace('_', ' ', htmlspecialchars($anuncio['logistic_type'] ?? 'N/A')); ?></span></p>
+                        <p><strong>Frete Grátis:</strong> 
+                            <span class="font-semibold <?= $anuncio['is_free_shipping'] ? 'text-green-600' : 'text-red-600'; ?>">
+                                <?= $anuncio['is_free_shipping'] ? 'Sim' : 'Não'; ?>
+                            </span>
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Coluna de Métricas -->
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-700"><i class="fas fa-chart-bar mr-2"></i> Métricas</h2>
+                    <div class="space-y-3">
+                        <div class="flex justify-between"><span>Estoque:</span> <span class="font-bold"><?= htmlspecialchars($anuncio['stock']); ?></span></div>
+                        <div class="flex justify-between"><span>Vendas Totais:</span> <span class="font-bold"><?= htmlspecialchars($anuncio['total_sales']); ?></span></div>
+                        <div class="flex justify-between items-center">
+                            <span>Saúde do Anúncio:</span>
+                            <?php
+                                $health = $anuncio['health'] * 100;
+                                $healthColor = 'bg-green-500';
+                                if ($health < 85) $healthColor = 'bg-yellow-500';
+                                if ($health < 60) $healthColor = 'bg-red-500';
+                            ?>
+                            <div class="flex items-center">
+                                <div class="w-20 bg-gray-200 rounded-full h-2.5">
+                                    <div class="<?= $healthColor ?> h-2.5 rounded-full" style="width: <?= $health ?>%"></div>
+                                </div>
+                                <span class="ml-2 text-sm font-bold"><?= number_format($health, 0) ?>%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dados Brutos da API -->
+            <div class="bg-white p-6 rounded-lg shadow-md mt-6">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700"><i class="fas fa-code mr-2"></i> Dados Brutos da API</h2>
+                <pre><?= htmlspecialchars(json_encode(json_decode($anuncio['data']), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)); ?></pre>
+            </div>
+
+        <?php endif; ?>
+    </main>
+
+</body>
+</html>

@@ -7,6 +7,13 @@ include_once BASE_PATH . '/src/Views/layouts/header.phtml';
     <p class="text-lg text-gray-600">Escolha o plano que melhor se adapta às suas necessidades.</p>
 </div>
 
+<?php if (has_flash_message('billing_error')): ?>
+    <div class="mt-6 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md" role="alert">
+        <p class="font-bold">Acesso Restrito</p>
+        <p><?= get_flash_message('billing_error'); ?></p>
+    </div>
+<?php endif; ?>
+
 <div class="mt-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
     <?php if (empty($plans)): ?>
         <div class="col-span-full text-center text-gray-500">

@@ -1,27 +1,45 @@
 <?php
 namespace App\Models;
 
+/**
+ * Classe para interagir com a API do Mercado Livre.
+ * Simplifica a execução de requisições HTTP para os endpoints da API.
+ */
 class MercadoLivreApi
 {
     private const API_BASE_URL = 'https://api.mercadolibre.com';
+    private string $accessToken;
+
+    /**
+     * Construtor da classe.
+     * @param string $accessToken O token de acesso para autenticar as requisições.
+     */
+    public function __construct(string $accessToken)
+    {
+        $this->accessToken = $accessToken;
+    }
 
     /**
      * Faz uma requisição cURL para um endpoint da API do ML.
      *
-     * @param string $url
-     * @param string $method
-     * @param array $headers
-     * @param mixed $postData
-     * @return array
+     * @param string $url A URL completa da requisição.
+     * @param string $method O método HTTP (GET, POST, etc.).
+     * @param array $extraHeaders Cabeçalhos adicionais.
+     * @param mixed $postData Dados para requisições POST/PUT.
+     * @return array Retorna o código HTTP e a resposta decodificada.
      */
-    private function makeRequest(string $url, string $method = 'GET', array $headers = [], $postData = null): array
+    private function makeRequest(string $url, string $method = 'GET', array $extraHeaders = [], $postData = null): array
     {
         $ch = curl_init();
+        $headers = array_merge(['Authorization: Bearer ' . $this->accessToken], $extraHeaders);
+
         curl_setopt_array($ch, [
             CURLOPT_URL => $url,
             CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_CONNECTTIMEOUT => 10, // Timeout de conexão
+            CURLOPT_TIMEOUT => 30, // Timeout total da requisição
         ]);
 
         if ($postData) {
@@ -30,73 +48,93 @@ class MercadoLivreApi
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
         curl_close($ch);
+
+        if ($error) {
+            log_message("cURL Error for URL {$url}: {$error}", 'ERROR');
+            return ['httpCode' => 500, 'response' => null, 'error' => $error];
+        }
 
         return ['httpCode' => $httpCode, 'response' => json_decode($response, true)];
     }
-    
+
     /**
-     * Busca os IDs de todos os anúncios de um usuário usando a paginação por scroll.
+     * Busca os detalhes de múltiplos itens de uma vez.
      *
-     * @param int $mlUserId
-     * @param string $accessToken
-     * @return array Retorna um array com 'item_ids' e 'error'.
+     * @param array $itemIds Array com os IDs dos itens.
+     * @param array $attributes Array com os atributos desejados.
+     * @return array Retorna um array de respostas, uma para cada item.
      */
-    public function getAllItemIds(int $mlUserId, string $accessToken): array
-    {
-        $allItemIds = [];
-        $scrollId = null;
-        $headers = ['Authorization: Bearer ' . $accessToken];
-
-        do {
-            $url = self::API_BASE_URL . "/users/{$mlUserId}/items/search?search_type=scan&limit=50";
-            if ($scrollId) {
-                $url .= "&scroll_id={$scrollId}";
-            }
-
-            $result = $this->makeRequest($url, 'GET', $headers);
-            
-            if ($result['httpCode'] !== 200) {
-                return ['item_ids' => null, 'error' => 'Falha ao buscar anúncios. HTTP: ' . $result['httpCode']];
-            }
-
-            $data = $result['response'];
-            if (isset($data['results']) && !empty($data['results'])) {
-                $allItemIds = array_merge($allItemIds, $data['results']);
-                $scrollId = $data['scroll_id'] ?? null;
-            } else {
-                $scrollId = null;
-            }
-
-        } while ($scrollId);
-
-        return ['item_ids' => $allItemIds, 'error' => null];
-    }
-/**
-     * Busca os detalhes de um lote de anúncios usando a API /items.
-     *
-     * @param array $itemIds Array de IDs de anúncios (ex: ['MLB123', 'MLB456']).
-     * @param string $accessToken
-     * @return array Retorna um array com 'data' e 'error'.
-     */
-    public function getItemsDetails(array $itemIds, string $accessToken): array
+    public function getMultipleItemDetails(array $itemIds, array $attributes): array
     {
         if (empty($itemIds)) {
-            return ['data' => [], 'error' => null];
+            return [];
         }
 
-        // A API permite buscar até 20 itens por vez.
-        $idsString = implode(',', array_slice($itemIds, 0, 20));
-        $attributes = 'id,title,price,available_quantity,status,permalink,thumbnail,date_created,health,category_id,shipping,variations,seller_custom_field';
-        $url = self::API_BASE_URL . "/items?ids={$idsString}&attributes={$attributes}";
-        $headers = ['Authorization: Bearer ' . $accessToken];
+        $idsString = implode(',', $itemIds);
+        $attributesString = implode(',', $attributes);
+        $url = self::API_BASE_URL . "/items?ids={$idsString}&attributes={$attributesString}";
 
-        $result = $this->makeRequest($url, 'GET', $headers);
+        $result = $this->makeRequest($url);
 
-        if ($result['httpCode'] !== 200) {
-            return ['data' => null, 'error' => 'Falha ao buscar detalhes dos itens. HTTP: ' . $result['httpCode']];
+        // A API retorna um array de resultados. Cada resultado tem um 'code' e um 'body'.
+        // Se a chamada geral falhar (ex: token inválido), retorna um array vazio.
+        return $result['response'] ?? [];
+    }
+
+    /**
+     * Executa múltiplas requisições GET em paralelo.
+     *
+     * @param array $urls Um array associativo de 'key' => 'url'.
+     * @return array Um array associativo de 'key' => 'response_body'.
+     */
+    public function getParallel(array $urls): array
+    {
+        if (empty($urls)) {
+            return [];
         }
 
-        return ['data' => $result['response'], 'error' => null];
+        $multiHandle = curl_multi_init();
+        $curlHandles = [];
+        $results = [];
+        $headers = ['Authorization: Bearer ' . $this->accessToken];
+
+        // Prepara cada handle cURL
+        foreach ($urls as $key => $url) {
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER => $headers,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_TIMEOUT => 30,
+            ]);
+            $curlHandles[$key] = $ch;
+            curl_multi_add_handle($multiHandle, $ch);
+        }
+
+        // Executa as requisições
+        $running = null;
+        do {
+            curl_multi_exec($multiHandle, $running);
+            curl_multi_select($multiHandle); // Aguarda por atividade
+        } while ($running > 0);
+
+        // Coleta os resultados
+        foreach ($curlHandles as $key => $ch) {
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            if ($httpCode === 200) {
+                $results[$key] = json_decode(curl_multi_getcontent($ch), true);
+            } else {
+                $results[$key] = null; // Falha na requisição específica
+                log_message("Parallel GET failed for URL {$urls[$key]} with HTTP code {$httpCode}", 'WARNING');
+            }
+            curl_multi_remove_handle($multiHandle, $ch);
+            curl_close($ch);
+        }
+
+        curl_multi_close($multiHandle);
+
+        return $results;
     }
 }

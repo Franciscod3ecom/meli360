@@ -15,6 +15,9 @@ class Database
     public static function getInstance(): PDO
     {
         if (self::$instance === null) {
+            // Log de tentativa de conexão
+            log_message("Database::getInstance() - Tentando estabelecer nova conexão PDO...", "DEBUG");
+
             if (!defined('DB_HOST') || !defined('DB_DATABASE') || !defined('DB_USERNAME') || !defined('DB_PASSWORD')) {
                 die('Erro Crítico: Constantes do banco de dados não definidas. Verifique se o config.php está sendo incluído e se o .env está sendo carregado.');
             }
@@ -29,6 +32,8 @@ class Database
 
             try {
                 self::$instance = new PDO($dsn, DB_USERNAME, DB_PASSWORD, $options);
+                // Log de sucesso na conexão
+                log_message("Database::getInstance() - Conexão PDO estabelecida com sucesso.", "DEBUG");
             } catch (PDOException $e) {
                 // =====================================================================
                 // MUDANÇA CRÍTICA PARA DEPURAÇÃO

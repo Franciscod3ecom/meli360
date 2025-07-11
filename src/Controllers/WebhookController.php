@@ -100,18 +100,19 @@ class WebhookController
 
         log_message("Webhook Asaas Recebido: " . $json, 'INFO');
 
+        // Validação básica
         if (!$data || !isset($data['event'])) {
             http_response_code(400);
             return;
         }
 
-        // Responde imediatamente ao Asaas com 200 OK.
+        // Responde imediatamente ao Asaas com 200 OK para evitar timeouts.
         http_response_code(200);
         if (function_exists('fastcgi_finish_request')) {
             fastcgi_finish_request();
         }
 
-        // Processa apenas os eventos de pagamento confirmado
+        // Processa apenas os eventos de pagamento confirmado ou recebido
         if ($data['event'] === 'PAYMENT_CONFIRMED' || $data['event'] === 'PAYMENT_RECEIVED') {
             try {
                 $this->processPaymentConfirmation($data['payment']);
@@ -122,7 +123,7 @@ class WebhookController
     }
 
     /**
-     * Processa a confirmação de um pagamento.
+     * Processa a confirmação de um pagamento recebido pelo webhook.
      */
     private function processPaymentConfirmation(array $paymentData): void
     {
@@ -138,6 +139,7 @@ class WebhookController
         // 2. Encontra a assinatura relacionada e a ativa
         $payment = $paymentModel->findByAsaasId($asaasPaymentId);
         if ($payment && $payment['subscription_id']) {
+            // Define a data de expiração para 30 dias a partir de hoje
             $newExpiryDate = (new \DateTime())->modify('+30 days')->format('Y-m-d');
             $subscriptionModel->updateStatus($payment['subscription_id'], 'active', $newExpiryDate);
             log_message("Assinatura ID {$payment['subscription_id']} ativada até {$newExpiryDate}.", 'INFO');

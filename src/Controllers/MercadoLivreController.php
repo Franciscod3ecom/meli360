@@ -31,91 +31,72 @@ class MercadoLivreController
 
     /**
      * Lida com o retorno do Mercado Livre após a autorização do usuário.
-     * Troca o código de autorização por tokens e os salva no banco de dados.
      */
     public function handleCallback(): void
     {
         if (empty($_GET['state']) || empty($_SESSION['oauth2state']) || $_GET['state'] !== $_SESSION['oauth2state']) {
             unset($_SESSION['oauth2state']);
-            die('Erro de segurança: State inválido. Por favor, tente conectar novamente.');
+            set_flash_message('error', 'Erro de segurança. Por favor, tente conectar novamente.');
+            header('Location: /dashboard');
+            exit;
         }
         unset($_SESSION['oauth2state']);
 
         if (empty($_GET['code'])) {
-            die('Erro: Código de autorização não recebido do Mercado Livre.');
+            set_flash_message('error', 'Código de autorização não recebido do Mercado Livre.');
+            header('Location: /dashboard');
+            exit;
         }
 
         $code = $_GET['code'];
-        $tokenUrl = 'https://api.mercadolibre.com/oauth/token';
-        $postData = http_build_query([
-            'grant_type'    => 'authorization_code',
-            'client_id'     => $_ENV['ML_APP_ID'],
-            'client_secret' => $_ENV['ML_SECRET_KEY'],
-            'code'          => $code,
-            'redirect_uri'  => $_ENV['ML_REDIRECT_URI'],
-        ]);
+        $mlUserModel = new MercadoLivreUser();
+        $tokenData = $mlUserModel->exchangeCodeForTokens($code);
         
-        $ch = curl_init();
-        curl_setopt_array($ch, [
-            CURLOPT_URL => $tokenUrl, CURLOPT_POST => 1, CURLOPT_POSTFIELDS => $postData,
-            CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => ['Accept: application/json', 'Content-Type: application/x-www-form-urlencoded']
-        ]);
-        $response = curl_exec($ch);
-        $tokenData = json_decode($response, true);
-        
-        if (!isset($tokenData['access_token'])) {
-             die('Erro ao obter os tokens do Mercado Livre. Resposta: ' . htmlspecialchars($response));
+        if (!$tokenData) {
+             set_flash_message('error', 'Erro ao obter os tokens do Mercado Livre. Tente novamente.');
+             header('Location: /dashboard');
+             exit;
         }
         
-        $userUrl = 'https://api.mercadolibre.com/users/me';
-        curl_setopt_array($ch, [
-            CURLOPT_URL => $userUrl, CURLOPT_POST => 0,
-            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $tokenData['access_token']]
-        ]);
-        $userResponse = curl_exec($ch);
-        curl_close($ch);
-        $userData = json_decode($userResponse, true);
-        $nickname = $userData['nickname'] ?? 'N/A';
+        $userData = $mlUserModel->getUserInfo($tokenData['access_token']);
         
-        $mlUserModel = new MercadoLivreUser();
         $mlUserModel->saveOrUpdateTokens(
             $_SESSION['user_id'],
             $tokenData['user_id'],
-            $nickname,
+            $userData['nickname'] ?? 'N/A',
             $tokenData['access_token'],
             $tokenData['refresh_token'],
             $tokenData['expires_in']
         );
 
-        header('Location: /dashboard?status=ml_connected');
+        set_flash_message('success', 'Conta do Mercado Livre conectada com sucesso!');
+        header('Location: /dashboard');
         exit;
     }
 
     /**
-     * Solicita a sincronização para UMA conta específica do Mercado Livre.
-     * Apenas coloca a conta na fila. O Cron Job fará o trabalho pesado.
+     * Coloca uma conta específica na fila para sincronização.
+     * @param int $ml_user_id
      */
-    public function requestSync(): void
+    public function requestSync(int $ml_user_id): void
     {
-        if (!isset($_GET['ml_user_id']) || !is_numeric($_GET['ml_user_id'])) {
-            header('Location: /dashboard/analysis?status=invalid_request');
-            exit;
+        log_message("SYNC_REQUEST: Recebida solicitação para ML User ID {$ml_user_id} pelo SaaS User ID {$_SESSION['user_id']}.");
+        $mlUserModel = new \App\Models\MercadoLivreUser();
+
+        if ($mlUserModel->doesAccountBelongToUser($_SESSION['user_id'], $ml_user_id)) {
+            $success = $mlUserModel->updateSyncStatusByMlUserId($ml_user_id, 'QUEUED', 'Sincronização solicitada pelo usuário.');
+            
+            if ($success) {
+                log_message("SYNC_REQUEST: Status para ML User ID {$ml_user_id} atualizado para QUEUED com sucesso.");
+                header('Location: /dashboard/analysis?sync_status=requested');
+            } else {
+                log_message("SYNC_REQUEST: Falha ao atualizar o status no banco para ML User ID {$ml_user_id}.", "ERROR");
+                header('Location: /dashboard/analysis?sync_status=db_error');
+            }
+        } else {
+            log_message("SYNC_REQUEST: Tentativa de sincronizar conta não pertencente ao usuário.", "WARNING");
+            header('Location: /dashboard/analysis?sync_status=permission_denied');
         }
-
-        $mlUserId = (int)$_GET['ml_user_id'];
-        
-        $mlUserModel = new MercadoLivreUser();
-        
-        // Apenas atualiza o status para 'QUEUED'. O Cron Job cuidará do resto.
-        $mlUserModel->updateSyncStatusByMlUserId(
-            $mlUserId, 
-            'QUEUED', 
-            'A sincronização foi colocada na fila e começará em breve.'
-        );
-
-        // Redireciona de volta para a página de análise com uma mensagem de sucesso
-        set_flash_message('sync_status', 'Sincronização solicitada! A atualização dos dados começará em alguns minutos.');
-        header('Location: /dashboard/analysis');
         exit;
     }
 }
