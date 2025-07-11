@@ -9,8 +9,9 @@
 use App\Controllers\AuthController;
 use App\Controllers\DashboardController;
 use App\Controllers\MercadoLivreController;
-use App\Controllers\AdminController; // Adicione este 'use' no topo do arquivo
-
+use App\Controllers\AdminController;
+use App\Controllers\AccountController;
+use App\Controllers\SettingsController;
 
 // --- ROTAS PÚBLICAS (acessíveis sem login) ---
 
@@ -36,12 +37,18 @@ $router->get('/logout', AuthController::class . '@logout');
 // Deve ser pública para que o servidor do ML consiga nos enviar o código de autorização.
 $router->get('/ml/callback', MercadoLivreController::class . '@handleCallback');
 
+// Rota para receber notificações do Mercado Livre (perguntas, etc.)
+$router->post('/webhooks/mercadolivre', 'App\Controllers\WebhookController@handleMercadoLivre');
+
+// Rota para receber notificações do Asaas (pagamentos, etc.)
+$router->post('/webhooks/asaas', 'App\Controllers\WebhookController@handleAsaas');
+
 
 // --- ROTAS PROTEGIDAS (requerem que o usuário esteja logado) ---
 
 // Middleware de verificação de autenticação.
 // Ele é executado ANTES de qualquer rota que corresponda ao padrão '/dashboard.*'.
-$router->before('GET|POST', '/dashboard.*', function() {
+$router->before('GET|POST', '/dashboard.*|/billing.*', function() {
     if (!isset($_SESSION['user_id'])) {
         // Usa o sistema de flash messages para uma melhor experiência do usuário.
         set_flash_message('auth_error', 'Você precisa estar logado para acessar esta página.');
@@ -56,11 +63,25 @@ $router->get('/dashboard', DashboardController::class . '@index');
 // A rota para a nova página de Análise de Anúncios.
 $router->get('/dashboard/analysis', DashboardController::class . '@analysis');
 
+// A rota para a página do Respondedor IA.
+$router->get('/dashboard/responder', DashboardController::class . '@responder');
+
 // A rota para o usuário solicitar uma nova sincronização de anúncios.
-$router->get('/dashboard/sync', MercadoLivreController::class . '@requestSync');
+$router->get('/dashboard/sync/(\d+)', MercadoLivreController::class . '@requestSync');
+
+// A rota para definir a conta ML ativa na sessão.
+$router->get('/dashboard/set-active-account/(\d+)', AccountController::class . '@setActiveAccount');
+
+// Rota de Configurações
+$router->get('/dashboard/settings', SettingsController::class . '@index');
+$router->post('/dashboard/settings/update', SettingsController::class . '@update');
 
 // A rota para iniciar o processo de conexão com o Mercado Livre.
 $router->get('/dashboard/conectar/mercadolivre', MercadoLivreController::class . '@redirectToAuth');
+
+// --- ROTAS DE BILLING ---
+$router->get('/billing/plans', 'App\Controllers\BillingController@plans');
+$router->post('/billing/subscribe/(\d+)', 'App\Controllers\BillingController@subscribe');
 
 
 // --- ROTA DE FALLBACK (404 - PÁGINA NÃO ENCONTRADA) ---
@@ -88,5 +109,37 @@ $router->before('GET|POST', '/admin/.*', function() {
     }
 });
 
+// Rota principal do painel de administração
+$router->get('/admin', AdminController::class . '@index');
+$router->get('/admin/dashboard', AdminController::class . '@index');
+
+// Rota para ver os detalhes de um usuário específico
+$router->get('/admin/user/(\d+)', AdminController::class . '@showUserDetails');
+
+// Rota para salvar as alterações do usuário
+$router->post('/admin/user/(\d+)/update', AdminController::class . '@updateUser');
+
+// Rota para iniciar a personificação (apenas para admins)
+$router->get('/admin/impersonate/start/(\d+)', 'App\Controllers\ImpersonationController@start');
+
 // Rota para acionar a sincronização manualmente
 $router->get('/admin/sync', AdminController::class . '@triggerSync');
+
+// Rota para parar a personificação (acessível por todos, mas só funciona se estiver personificando)
+$router->get('/impersonate/stop', 'App\Controllers\ImpersonationController@stop');
+
+// --- ROTAS PARA CONSULTORES ---
+
+$router->before('GET|POST', '/consultant.*', function() {
+    if (!isset($_SESSION['user_id'])) {
+        header('Location: /login');
+        exit();
+    }
+    if ($_SESSION['user_role'] !== 'consultant') {
+        http_response_code(403);
+        view('errors.403');
+        exit();
+    }
+});
+
+$router->get('/consultant/dashboard', 'App\Controllers\ConsultantController@index');

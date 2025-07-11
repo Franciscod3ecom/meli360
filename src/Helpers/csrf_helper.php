@@ -36,13 +36,13 @@ if (!function_exists('validate_csrf_token')) {
     }
 }
 
-if (!function_exists('csrf_input')) {
+if (!function_exists('generate_csrf_token_input')) {
     /**
      * Gera o campo de input HTML oculto com o token CSRF.
      *
      * @return void
      */
-    function csrf_input(): void
+    function generate_csrf_token_input(): void
     {
         echo '<input type="hidden" name="csrf_token" value="' . generate_csrf_token() . '">';
     }

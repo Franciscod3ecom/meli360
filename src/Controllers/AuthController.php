@@ -103,7 +103,9 @@ class AuthController
             ->validate('email', 'required', 'O campo e-mail é obrigatório.')
             ->validate('email', 'email', 'Por favor, insira um e-mail válido.')
             ->validate('password', 'required', 'O campo senha é obrigatório.')
-            ->validate('password', 'password_strength', 'A senha deve ter no mínimo 8 caracteres, com letras e números.');
+            ->validate('password', 'min:8', 'A senha deve ter no mínimo 8 caracteres.')
+            ->validate('password_confirmation', 'matches:password', 'As senhas não coincidem.')
+            ->validate('whatsapp', 'required', 'O campo WhatsApp é obrigatório.');
 
         if ($validator->fails()) {
             set_flash_message('register_error', $validator->getFirstError()); // Use uma chave diferente para a página de registro
@@ -114,12 +116,23 @@ class AuthController
         $name = $_POST['name'];
         $email = $_POST['email'];
         $password = $_POST['password'];
+        $whatsapp = $_POST['whatsapp'];
 
+        // Validação adicional para o formato do WhatsApp
+        $whatsapp_cleaned = preg_replace('/[^\d]/', '', $whatsapp);
+        if (!preg_match('/^\d{10,11}$/', $whatsapp_cleaned)) {
+            set_flash_message('register_error', 'Formato do WhatsApp inválido. Use apenas DDD + Número.');
+            $_SESSION['form_data'] = ['name' => $name, 'email' => $email, 'whatsapp' => $whatsapp];
+            header('Location: /register');
+            exit;
+        }
+        $whatsapp_jid = "55" . $whatsapp_cleaned . "@s.whatsapp.net";
+
+        // 2. Verifica se o e-mail já está em uso
         $userModel = new User();
-
-        // 2. Verifica se o email já está em uso
         if ($userModel->findByEmail($email)) {
-            set_flash_message('register_error', 'Este endereço de e-mail já está em uso.');
+            set_flash_message('register_error', 'Este e-mail já está cadastrado.');
+            $_SESSION['form_data'] = ['name' => $name, 'email' => $email, 'whatsapp' => $whatsapp];
             header('Location: /register');
             exit;
         }
@@ -128,17 +141,17 @@ class AuthController
         $passwordHash = password_hash($password, PASSWORD_DEFAULT);
 
         // 4. Cria o usuário no banco de dados
-        $newUserId = $userModel->create($name, $email, $passwordHash);
+        $userId = $userModel->create($name, $email, $passwordHash, 'user', $whatsapp_jid);
 
-        if ($newUserId) {
-            // Sucesso! Loga o usuário recém-criado automaticamente e redireciona.
-            $this->createUserSession($newUserId, $email, 'user'); // Papel padrão
+        if ($userId) {
+            // 5. Cria a sessão do usuário
+            $this->createUserSession($userId, $email, 'user'); // Papel padrão
             set_flash_message('dashboard_status', 'Registro realizado com sucesso! Bem-vindo(a).', 'success');
             header('Location: /dashboard');
             exit;
         } else {
-            // Erro ao criar usuário no banco.
             set_flash_message('register_error', 'Ocorreu um erro ao criar sua conta. Tente novamente.');
+            $_SESSION['form_data'] = ['name' => $name, 'email' => $email, 'whatsapp' => $whatsapp];
             header('Location: /register');
             exit;
         }

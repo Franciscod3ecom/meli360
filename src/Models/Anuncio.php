@@ -25,32 +25,14 @@ class Anuncio
         $this->db = Database::getInstance();
     }
 
-    /**
-     * Busca todos os anúncios sincronizados de um usuário da plataforma para exibição.
-     */
-    public function findAllBySaasUserId(int $saasUserId): array
-    {
-        $stmt = $this->db->prepare("SELECT * FROM anuncios WHERE saas_user_id = :saas_user_id AND sync_status = 1 ORDER BY status, title ASC");
-        $stmt->execute([':saas_user_id' => $saasUserId]);
-        return $stmt->fetchAll();
-    }
+    // ===================================================================
+    // MÉTODOS DA FASE 1: COLETA DE IDS
+    // ===================================================================
 
     /**
-     * Conta o número total de anúncios de um usuário (sincronizados ou não).
+     * Limpa todos os anúncios de uma conta ML antes de uma nova sincronização.
      */
-    public function countBySaasUserId(int $saasUserId): array
-    {
-        $stmt = $this->db->prepare("SELECT sync_status, COUNT(*) as count FROM anuncios WHERE saas_user_id = :saas_user_id GROUP BY sync_status");
-        $stmt->execute([':saas_user_id' => $saasUserId]);
-        return $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
-    }
-
-    // --- MÉTODOS PARA FASE 1: COLETA DE IDS ---
-
-    /**
-     * Limpa todos os anúncios de um usuário do ML antes de uma nova sincronização.
-     */
-    public function clearAllByMlUserId(int $mlUserId): bool
+    public function clearByMlUserId(int $mlUserId): bool
     {
         $stmt = $this->db->prepare("DELETE FROM anuncios WHERE ml_user_id = :ml_user_id");
         return $stmt->execute([':ml_user_id' => $mlUserId]);
@@ -74,36 +56,82 @@ class Anuncio
             $values[] = $saasUserId;
             $values[] = $mlUserId;
         }
-
         $sql .= implode(', ', $placeholders);
         $stmt = $this->db->prepare($sql);
         $stmt->execute($values);
         return $stmt->rowCount();
     }
 
-    // --- MÉTODOS PARA FASE 2: DETALHAMENTO EM LOTES ---
+    // ===================================================================
+    // MÉTODOS DA FASE 2: DETALHAMENTO BÁSICO E ANÁLISE PROFUNDA
+    // ===================================================================
 
     /**
-     * Encontra um lote de anúncios que ainda não foram detalhados.
+     * Encontra um lote de anúncios para a próxima etapa do pipeline.
      */
-    public function findAnunciosToDetail(int $limit = 20): array
+    public function findAnunciosToProcess(int $status, int $limit = 20): array
     {
-        $stmt = $this->db->prepare("SELECT * FROM anuncios WHERE sync_status = 0 AND (last_sync_attempt IS NULL OR last_sync_attempt < NOW() - INTERVAL 1 HOUR) LIMIT :limit");
+        $sql = "SELECT * FROM anuncios WHERE sync_status = :status AND (last_sync_attempt IS NULL OR last_sync_attempt < NOW() - INTERVAL 1 HOUR) LIMIT :limit";
+        $stmt = $this->db->prepare($sql);
+        $stmt->bindValue(':status', $status, PDO::PARAM_INT);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
         return $stmt->fetchAll();
     }
 
     /**
-     * Encontra um lote de anúncios prontos para a análise profunda (frete, etc.).
+     * Atualiza os detalhes básicos de múltiplos anúncios de uma vez.
      */
-    public function findAnunciosToAnalyze(int $limit = 10): array
+    public function bulkUpdateBasicDetails(array $itemsData): int
     {
-        // Pega anúncios com status 1 (Detalhes Básicos OK)
-        $stmt = $this->db->prepare("SELECT ml_item_id, category_id FROM anuncios WHERE sync_status = 1 AND (last_sync_attempt IS NULL OR last_sync_attempt < NOW() - INTERVAL 1 HOUR) LIMIT :limit");
-        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-        $stmt->execute();
-        return $stmt->fetchAll();
+        if (empty($itemsData)) return 0;
+        $updatedCount = 0;
+        $sql = "UPDATE anuncios SET
+                    title = :title, sku = :sku, price = :price, stock = :stock,
+                    total_visits = :total_visits, total_sales = :total_sales, health = :health,
+                    status = :status, permalink = :permalink, thumbnail = :thumbnail, 
+                    category_id = :category_id, has_variations = :has_variations,
+                    data = :data, sync_status = 1, last_sync_attempt = NOW()
+                WHERE ml_item_id = :ml_item_id";
+        $stmt = $this->db->prepare($sql);
+
+        foreach ($itemsData as $item) {
+            if (isset($item['code']) && $item['code'] === 200 && isset($item['body'])) {
+                $body = $item['body'];
+                
+                // Extrai o SKU do primeiro atributo, se existir
+                $sku = null;
+                if (!empty($body['attributes'])) {
+                    foreach ($body['attributes'] as $attribute) {
+                        if ($attribute['id'] === 'SELLER_SKU' && !empty($attribute['value_name'])) {
+                            $sku = $attribute['value_name'];
+                            break;
+                        }
+                    }
+                }
+
+                $success = $stmt->execute([
+                    ':title' => $body['title'],
+                    ':sku' => $sku,
+                    ':price' => $body['price'],
+                    ':stock' => $body['available_quantity'],
+                    ':total_visits' => $body['visits'] ?? 0, // Extraído do endpoint /visits/items (não vem no /items) - Placeholder
+                    ':total_sales' => $body['sold_quantity'] ?? 0,
+                    ':health' => $body['health'] ?? 0.00,
+                    ':status' => $body['status'],
+                    ':permalink' => $body['permalink'],
+                    ':thumbnail' => $body['thumbnail'],
+                    ':category_id' => $body['category_id'],
+                    ':has_variations' => !empty($body['variations']),
+                    ':data' => json_encode($body),
+                    ':ml_item_id' => $body['id']
+                ]);
+                if ($success) $updatedCount++;
+            } else {
+                $this->markAsFailed($item['body']['id'] ?? null);
+            }
+        }
+        return $updatedCount;
     }
 
     /**
@@ -111,97 +139,91 @@ class Anuncio
      */
     public function updateDeepAnalysis(string $mlItemId, ?string $shippingData, ?string $categoryData): bool
     {
+        $shippingJson = json_decode($shippingData, true);
+        $shippingMode = $shippingJson['mode'] ?? null;
+        $isFreeShipping = false;
+        if(isset($shippingJson['options'])){
+            foreach($shippingJson['options'] as $option){
+                if($option['free_method']){
+                    $isFreeShipping = true;
+                    break;
+                }
+            }
+        }
+        $logisticType = $shippingJson['logistic_type'] ?? null;
+
         $sql = "UPDATE anuncios SET
-                    shipping_data = :shipping_data,
-                    category_data = :category_data,
-                    sync_status = 2, -- Marca como Análise Profunda OK
-                    last_sync_attempt = NOW()
+                    shipping_data = :shipping_data, category_data = :category_data,
+                    shipping_mode = :shipping_mode, is_free_shipping = :is_free_shipping, logistic_type = :logistic_type,
+                    sync_status = 2, last_sync_attempt = NOW()
                 WHERE ml_item_id = :ml_item_id";
         
         $stmt = $this->db->prepare($sql);
         return $stmt->execute([
             ':shipping_data' => $shippingData,
             ':category_data' => $categoryData,
+            ':shipping_mode' => $shippingMode,
+            ':is_free_shipping' => $isFreeShipping,
+            ':logistic_type' => $logisticType,
             ':ml_item_id' => $mlItemId
         ]);
     }
 
     /**
-     * Atualiza os detalhes de múltiplos anúncios de uma vez.
-     */
-    public function bulkUpdateDetails(array $itemsData): int
-    {
-        if (empty($itemsData)) {
-            return 0;
-        }
-
-        $updatedCount = 0;
-        $sql = "UPDATE anuncios SET
-                    title = :title,
-                    price = :price,
-                    status = :status,
-                    permalink = :permalink,
-                    thumbnail = :thumbnail,
-                    data = :data,
-                    sync_status = 1,
-                    last_sync_attempt = NOW()
-                WHERE ml_item_id = :ml_item_id";
-        
-        $stmt = $this->db->prepare($sql);
-
-        foreach ($itemsData as $item) {
-            // Verifica se a API retornou o corpo do item com sucesso
-            if (isset($item['code']) && $item['code'] === 200 && isset($item['body'])) {
-                $body = $item['body'];
-                $success = $stmt->execute([
-                    ':title' => $body['title'],
-                    ':price' => $body['price'],
-                    ':status' => $body['status'],
-                    ':permalink' => $body['permalink'],
-                    ':thumbnail' => $body['thumbnail'],
-                    ':data' => json_encode($body),
-                    ':ml_item_id' => $body['id']
-                ]);
-                if ($success) {
-                    $updatedCount++;
-                }
-            } else {
-                // Se houve erro na API para este item específico, marca como falho
-                $itemId = $item['body']['id'] ?? null;
-                if ($itemId) {
-                    $this->markAsFailed($itemId);
-                }
-            }
-        }
-        return $updatedCount;
-    }
-
-    /**
      * Marca um anúncio como falho para evitar retentativas constantes.
      */
-    public function markAsFailed(string $mlItemId): bool
+    public function markAsFailed(?string $mlItemId): bool
     {
+        if (!$mlItemId) return false;
         $stmt = $this->db->prepare("UPDATE anuncios SET sync_status = 9, last_sync_attempt = NOW() WHERE ml_item_id = :ml_item_id");
         return $stmt->execute([':ml_item_id' => $mlItemId]);
     }
 
+    // ===================================================================
+    // MÉTODOS DE CONSULTA PARA APLICAÇÃO
+    // ===================================================================
+
     /**
-     * Busca um anúncio específico pelo seu ID do Mercado Livre.
-     *
-     * @param string $mlItemId
-     * @return array|false
+     * Busca todos os anúncios de uma conta ML específica de um usuário SaaS, com paginação.
      */
-    public function findByMlItemId(string $mlItemId): array|false
+    public function findAllByMlUserId(int $saasUserId, int $mlUserId, int $limit, int $offset): array
     {
-        $stmt = $this->db->prepare("SELECT * FROM anuncios WHERE ml_item_id = :ml_item_id LIMIT 1");
-        $stmt->execute([':ml_item_id' => $mlItemId]);
-        $anuncio = $stmt->fetch();
+        $sql = "SELECT * FROM anuncios 
+                WHERE saas_user_id = :saas_user_id AND ml_user_id = :ml_user_id
+                ORDER BY status, title ASC
+                LIMIT :limit OFFSET :offset";
+        $stmt = $this->db->prepare($sql);
+        $stmt->bindValue(':saas_user_id', $saasUserId, PDO::PARAM_INT);
+        $stmt->bindValue(':ml_user_id', $mlUserId, PDO::PARAM_INT);
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
 
-        // Se a coluna 'data' contiver um JSON, decodifica para um array.
-        if ($anuncio && !empty($anuncio['data'])) {
-            $anuncio['data'] = json_decode($anuncio['data'], true);
-        }
+    /**
+     * Conta o total de anúncios de uma conta ML específica de um usuário SaaS.
+     */
+    public function countByMlUserId(int $saasUserId, int $mlUserId): int
+    {
+        $stmt = $this->db->prepare("SELECT COUNT(*) FROM anuncios WHERE saas_user_id = :saas_user_id AND ml_user_id = :ml_user_id");
+        $stmt->execute([':saas_user_id' => $saasUserId, ':ml_user_id' => $mlUserId]);
+        return (int) $stmt->fetchColumn();
+    }
 
-        return $anuncio;
+    /**
+     * Conta o total de anúncios de uma conta ML com determinados status.
+     *
+     * @param int $mlUserId
+     * @param array $statuses
+     * @return int
+     */
+    public function countByStatus(int $mlUserId, array $statuses): int
+    {
+        $inQuery = implode(',', array_fill(0, count($statuses), '?'));
+        $sql = "SELECT COUNT(*) FROM anuncios WHERE ml_user_id = ? AND sync_status IN ($inQuery)";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute(array_merge([$mlUserId], $statuses));
+        return (int) $stmt->fetchColumn();
     }
 }

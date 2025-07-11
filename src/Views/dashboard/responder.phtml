@@ -1,0 +1,63 @@
+<?php
+include_once BASE_PATH . '/src/Views/layouts/header.phtml';
+?>
+
+<h1 class="text-3xl font-bold text-gray-800 mb-6">🤖 Histórico do Respondedor IA</h1>
+
+<div class="bg-white p-6 rounded-lg shadow-md">
+    <h2 class="text-xl font-semibold mb-4">Últimas Perguntas Recebidas</h2>
+    
+    <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pergunta</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resposta da IA</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                <?php if (empty($questions)): ?>
+                    <tr>
+                        <td colspan="3" class="text-center py-10 text-gray-500">
+                            <p>Nenhuma pergunta recebida ainda.</p>
+                        </td>
+                    </tr>
+                <?php else: ?>
+                    <?php foreach ($questions as $question): ?>
+                        <tr class="hover:bg-gray-50 transition-colors">
+                            <td class="px-6 py-4 align-top">
+                                <p class="text-sm text-gray-800 font-medium">"<?= htmlspecialchars($question['question_text']) ?>"</p>
+                                <p class="text-xs text-gray-500 mt-2">
+                                    Em: <a href="<?= htmlspecialchars($question['permalink']) ?>" target="_blank" class="text-indigo-600 hover:underline"><?= htmlspecialchars($question['anuncio_title']) ?></a>
+                                </p>
+                                <p class="text-xs text-gray-400 mt-1"><?= (new DateTime($question['question_date']))->format('d/m/Y H:i') ?></p>
+                            </td>
+                            <td class="px-6 py-4 align-top">
+                                <p class="text-sm text-gray-600 italic"><?= nl2br(htmlspecialchars($question['generated_answer'] ?? 'Aguardando processamento...')) ?></p>
+                            </td>
+                            <td class="px-6 py-4 align-top whitespace-nowrap">
+                                <?php
+                                    $statusClasses = [
+                                        'UNANSWERED' => 'bg-yellow-100 text-yellow-800',
+                                        'ANSWERING' => 'bg-blue-100 text-blue-800',
+                                        'ANSWERED' => 'bg-green-100 text-green-800',
+                                        'FAILED' => 'bg-red-100 text-red-800',
+                                    ];
+                                    $class = $statusClasses[$question['question_status']] ?? 'bg-gray-100 text-gray-800';
+                                ?>
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full <?= $class ?>">
+                                    <?= htmlspecialchars($question['question_status']) ?>
+                                </span>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<?php
+include_once BASE_PATH . '/src/Views/layouts/footer.phtml';
+?>

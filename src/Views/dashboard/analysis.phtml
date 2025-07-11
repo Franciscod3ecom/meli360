@@ -12,83 +12,104 @@
     <?php require_once BASE_PATH . '/src/Views/layouts/header.phtml'; ?>
 
     <main class="container mx-auto px-4 lg:px-6 py-8">
-        <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
-            <h1 class="text-2xl font-semibold text-gray-800">Análise de Anúncios</h1>
-            <div>
-                <div x-data="{ open: false }" class="relative inline-block text-left">
-                    <div>
-                        <button @click="open = !open" type="button" class="inline-flex justify-center w-full rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                            🔄 Sincronizar Conta
-                            <svg class="-mr-1 ml-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
-                        </button>
-                    </div>
-                    <div x-show="open" @click.away="open = false" x-transition class="origin-top-right absolute right-0 mt-2 w-72 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
-                        <div class="py-1" role="menu" aria-orientation="vertical">
-                            <?php if(empty($mlConnections)): ?>
-                                <span class="text-gray-500 block px-4 py-2 text-sm">Nenhuma conta ML conectada.</span>
-                            <?php else: ?>
-                                <?php foreach($mlConnections as $conn): ?>
-                                    <a href="/dashboard/sync?ml_user_id=<?php echo $conn['ml_user_id']; ?>" class="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100" role="menuitem">
-                                        Sincronizar <?php echo htmlspecialchars($conn['nickname']); ?> (<?php echo htmlspecialchars($conn['ml_user_id']); ?>)
-                                    </a>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
+        <h1 class="text-3xl font-bold text-gray-800 mb-6">📊 Análise de Anúncios</h1>
+
+        <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+            <h2 class="text-xl font-semibold mb-4">Sincronizar Contas</h2>
+            <div class="space-y-3">
+                <?php foreach ($mlConnections as $conn): ?>
+                    <div class="flex justify-between items-center p-3 border-b last:border-b-0">
+                        <div>
+                            <p class="font-medium"><?= htmlspecialchars($conn['nickname']); ?> <span class="text-xs text-gray-500">(<?= htmlspecialchars($conn['ml_user_id']); ?>)</span></p>
+                            <p class="text-xs text-gray-500">Status Sincronização: <span class="font-semibold"><?= htmlspecialchars($conn['sync_status']); ?></span></p>
                         </div>
+                        <a href="/dashboard/sync/<?= $conn['ml_user_id']; ?>" class="px-3 py-1 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
+                            <i class="fas fa-sync-alt mr-2"></i> Iniciar Sincronização
+                        </a>
                     </div>
-                </div>
+                <?php endforeach; ?>
             </div>
         </div>
 
-        <?php if(isset($_GET['status']) && $_GET['status'] === 'sync_requested'): ?>
-             <div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-4" role="alert">
-                <p class="font-bold">Solicitação Recebida!</p>
-                <p>A sincronização foi agendada e será iniciada em breve. Esta página será atualizada automaticamente.</p>
-            </div>
-        <?php endif; ?>
-
-        <div class="bg-white p-6 rounded-lg shadow-md overflow-x-auto">
-             <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Anúncio</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estoque</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Preço</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendas</th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                    <?php if (empty($anuncios)): ?>
-                        <tr>
-                            <td colspan="5" class="px-6 py-10 text-center text-gray-500">
-                                Nenhum anúncio encontrado. Escolha uma conta no menu "Sincronizar Conta" para começar.
-                            </td>
-                        </tr>
-                    <?php else: ?>
-                        <?php foreach ($anuncios as $anuncio): ?>
+        <div class="bg-white p-6 rounded-lg shadow-md">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">
+                📋 Seus Anúncios (Conta Ativa: <span class="text-indigo-600 font-bold"><?= $_SESSION['active_ml_nickname'] ?? 'Nenhuma Selecionada'; ?></span>)
+            </h2>
+            
+            <?php if (isset($activeMlAccountId)): ?>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
                             <tr>
-                                <td class="px-6 py-4 whitespace-nowrap">
-                                    <div class="flex items-center">
-                                        <div class="flex-shrink-0 h-10 w-10"><img class="h-10 w-10 rounded-md object-cover" src="<?php echo htmlspecialchars($anuncio['thumbnail'] ?? 'https://via.placeholder.com/40'); ?>" alt=""></div>
-                                        <div class="ml-4"><div class="text-sm font-medium text-gray-900"><?php echo htmlspecialchars($anuncio['title'] ?? 'Carregando...'); ?></div><div class="text-sm text-gray-500"><?php echo htmlspecialchars($anuncio['ml_item_id']); ?></div></div>
-                                    </div>
-                                </td>
-                                <td class="px-6 py-4 whitespace-nowrap"><span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800"><?php echo htmlspecialchars($anuncio['status'] ?? 'N/A'); ?></span></td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500"><?php echo htmlspecialchars($anuncio['stock'] ?? 'N/A'); ?></td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">R$ <?php echo htmlspecialchars(number_format($anuncio['price'] ?? 0, 2, ',', '.')); ?></td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500"><?php echo htmlspecialchars($anuncio['total_sales'] ?? 'N/A'); ?></td>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Anúncio</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estoque</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendas</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Saúde</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
                             </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-            <div class="mt-4 flex justify-between items-center">
-                <span class="text-sm text-gray-700">Mostrando <?php echo $offset + 1; ?> a <?php echo min($offset + $limit, $totalAnuncios); ?> de <?php echo $totalAnuncios; ?> anúncios.</span>
-                <div>
-                    <?php if ($page > 1): ?><a href="/dashboard/analysis?page=<?php echo $page - 1; ?>" class="px-3 py-1 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">Anterior</a><?php endif; ?>
-                    <?php if ($page < $totalPages): ?><a href="/dashboard/analysis?page=<?php echo $page + 1; ?>" class="ml-2 px-3 py-1 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">Próxima</a><?php endif; ?>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <?php if (empty($anuncios)): ?>
+                                <tr>
+                                    <td colspan="7" class="text-center py-10 text-gray-500">
+                                        <p>Nenhum anúncio encontrado para esta conta.</p>
+                                        <?php if (!empty($mlConnections)): ?>
+                                            <p class="mt-2">Clique em "Iniciar Nova Sincronização" para buscar seus anúncios.</p>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php else: ?>
+                                <?php foreach ($anuncios as $anuncio): ?>
+                                    <tr class="hover:bg-gray-50 transition-colors">
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <div class="flex items-center">
+                                                <div class="flex-shrink-0 h-12 w-12">
+                                                    <img class="h-12 w-12 rounded-md object-cover" src="<?= htmlspecialchars($anuncio['thumbnail']) ?>" alt="Thumbnail">
+                                                </div>
+                                                <div class="ml-4">
+                                                    <div class="text-sm font-medium text-gray-900 max-w-xs truncate" title="<?= htmlspecialchars($anuncio['title']) ?>"><?= htmlspecialchars($anuncio['title']) ?></div>
+                                                    <div class="text-xs text-gray-500"><?= htmlspecialchars($anuncio['ml_item_id']) ?></div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500"><?= htmlspecialchars($anuncio['sku'] ?? 'N/A') ?></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900"><?= htmlspecialchars($anuncio['stock'] ?? 0) ?></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900"><?= htmlspecialchars($anuncio['total_sales'] ?? 0) ?></td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <?php 
+                                                $health = ($anuncio['health'] ?? 0) * 100;
+                                                $healthColor = 'bg-red-500';
+                                                if ($health > 85) $healthColor = 'bg-green-500';
+                                                elseif ($health > 60) $healthColor = 'bg-yellow-500';
+                                            ?>
+                                            <div class="w-24 bg-gray-200 rounded-full h-2.5">
+                                                <div class="<?= $healthColor ?> h-2.5 rounded-full" style="width: <?= $health ?>%" title="Saúde: <?= number_format($health, 0) ?>%"></div>
+                                            </div>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full <?= $anuncio['status'] === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800' ?>">
+                                                <?= htmlspecialchars($anuncio['status']) ?>
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                            <a href="<?= htmlspecialchars($anuncio['permalink']) ?>" class="text-indigo-600 hover:text-indigo-900" target="_blank" title="Ver no Mercado Livre">
+                                                <i class="fas fa-external-link-alt"></i>
+                                            </a>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
                 </div>
-            </div>
+                <!-- Paginação aqui -->
+            <?php else: ?>
+                <div class="text-center text-gray-500 py-10">
+                    <p>Por favor, selecione uma conta na <a href="/dashboard" class="text-blue-600 hover:underline">Visão Geral</a> para começar.</p>
+                </div>
+            <?php endif; ?>
         </div>
     </main>
 </body>

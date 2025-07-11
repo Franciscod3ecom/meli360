@@ -1,0 +1,47 @@
+<?php
+include_once BASE_PATH . '/src/Views/layouts/header.phtml';
+?>
+
+<h1 class="text-3xl font-bold text-gray-800 mb-6">💼 Painel do Consultor</h1>
+
+<div class="bg-white p-6 rounded-lg shadow-md">
+    <h2 class="text-xl font-semibold mb-4">👨‍💼 Meus Clientes</h2>
+    <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nome do Cliente</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                <?php if (empty($clients)): ?>
+                    <tr>
+                        <td colspan="3" class="text-center py-10 text-gray-500">Você ainda não tem clientes associados.</td>
+                    </tr>
+                <?php else: ?>
+                    <?php foreach ($clients as $client): ?>
+                        <tr class="hover:bg-gray-50 transition-colors">
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm font-medium text-gray-900"><?= htmlspecialchars($client['name']) ?></div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm text-gray-500"><?= htmlspecialchars($client['email']) ?></div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                <a href="/impersonate/start/<?= $client['id'] ?>" class="text-indigo-600 hover:text-indigo-900" title="Acessar como este cliente">
+                                    <i class="fas fa-user-secret mr-2"></i> Acessar Dashboard
+                                </a>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<?php
+include_once BASE_PATH . '/src/Views/layouts/footer.phtml';
+?>

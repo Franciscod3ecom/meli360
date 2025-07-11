@@ -22,10 +22,16 @@ if (session_status() === PHP_SESSION_NONE) {
 // Carrega o arquivo de configuração central (que define BASE_PATH).
 require_once __DIR__ . '/../src/Core/config.php';
 
-// Carrega TODOS os nossos helpers de uma só vez.
-require_once __DIR__ . '/../src/helpers.php';
+// Carrega os helpers essenciais explicitamente
+require_once BASE_PATH . '/src/Helpers/log_helper.php';
+require_once BASE_PATH . '/src/Helpers/view_helper.php';
+require_once BASE_PATH . '/src/Helpers/flash_helper.php';
+require_once BASE_PATH . '/src/Helpers/csrf_helper.php';
+require_once BASE_PATH . '/src/Helpers/encryption_helper.php';
 
-// Instancia e executa o roteador.
+// Cria uma instância do roteador
 $router = new \Bramus\Router\Router();
+
+// Carrega as definições de rota
 require_once __DIR__ . '/../src/routes.php';
 $router->run();

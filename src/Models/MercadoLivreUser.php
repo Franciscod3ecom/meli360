@@ -13,10 +13,10 @@ class MercadoLivreUser
     public function __construct()
     {
         $this->db = Database::getInstance();
-        if (empty($_ENV['APP_ENCRYPTION_KEY'])) {
-            throw new \Exception("Chave de criptografia (APP_ENCRYPTION_KEY) não está definida no .env");
+        if (empty($_ENV['ENCRYPTION_KEY'])) {
+            throw new \Exception("Chave de criptografia (ENCRYPTION_KEY) não está definida no .env");
         }
-        $this->key = Key::loadFromAsciiSafeString($_ENV['APP_ENCRYPTION_KEY']);
+        $this->key = Key::loadFromAsciiSafeString($_ENV['ENCRYPTION_KEY']);
     }
 
     public function saveOrUpdateTokens(int $saasUserId, int $mlUserId, string $nickname, string $accessToken, string $refreshToken, int $expiresIn): bool
@@ -119,5 +119,61 @@ class MercadoLivreUser
             log_message("Falha ao descriptografar access token para {$mlUserId}: " . $e->getMessage(), "ERROR");
             return null;
         }
+    }
+    
+    public function updateAsaasCustomerId(int $userId, string $asaasCustomerId): bool
+    {
+        $sql = "UPDATE mercadolibre_users SET asaas_customer_id = :asaas_customer_id WHERE id = :id";
+        $stmt = $this->db->prepare($sql);
+        return $stmt->execute([':asaas_customer_id' => $asaasCustomerId, ':id' => $userId]);
+    }
+
+    /**
+     * Verifica se uma conta do Mercado Livre pertence a um usuário SaaS específico.
+     *
+     * @param int $saasUserId
+     * @param int $mlUserId
+     * @return bool
+     */
+    public function doesAccountBelongToUser(int $saasUserId, int $mlUserId): bool
+    {
+        $stmt = $this->db->prepare("SELECT id FROM mercadolibre_users WHERE saas_user_id = :saas_user_id AND ml_user_id = :ml_user_id");
+        $stmt->execute([':saas_user_id' => $saasUserId, ':ml_user_id' => $mlUserId]);
+        return $stmt->fetch() !== false;
+    }
+
+    /**
+     * Busca o nickname de uma conta do Mercado Livre pelo seu ID.
+     *
+     * @param int $mlUserId
+     * @return string|null
+     */
+    public function getNicknameByMlUserId(int $mlUserId): ?string
+    {
+        $stmt = $this->db->prepare("SELECT nickname FROM mercadolibre_users WHERE ml_user_id = :ml_user_id");
+        $stmt->execute([':ml_user_id' => $mlUserId]);
+        $result = $stmt->fetchColumn();
+        return $result ?: null;
+    }
+
+    /**
+     * Busca o saas_user_id a partir de um ml_user_id.
+     */
+    public function findSaasUserIdByMlUserId(int $mlUserId): ?int
+    {
+        $stmt = $this->db->prepare("SELECT saas_user_id FROM mercadolibre_users WHERE ml_user_id = :ml_user_id LIMIT 1");
+        $stmt->execute([':ml_user_id' => $mlUserId]);
+        $result = $stmt->fetchColumn();
+        return $result ? (int)$result : null;
+    }
+
+    /**
+     * Busca todas as conexões com um determinado status.
+     */
+    public function findConnectionsByStatus(string $status): array
+    {
+        $stmt = $this->db->prepare("SELECT * FROM mercadolibre_users WHERE sync_status = :status");
+        $stmt->execute([':status' => $status]);
+        return $stmt->fetchAll();
     }
 }

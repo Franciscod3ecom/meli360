@@ -1,17 +1,78 @@
-<header class="bg-white shadow-sm sticky top-0 z-10">
-    <nav class="container mx-auto px-4 lg:px-6 py-3 flex justify-between items-center">
-        <div class="flex items-center space-x-8">
-            <a href="/dashboard" class="text-xl font-bold text-gray-800">🚀 MELI 360</a>
-            <!-- Links de Navegação -->
-            <div class="hidden md:flex items-center space-x-6">
-                <a href="/dashboard" class="text-gray-600 hover:text-blue-600">Visão Geral</a>
-                <a href="/dashboard/analysis" class="text-gray-600 hover:text-blue-600">Análise de Anúncios</a>
-                <!-- Adicionar mais links aqui no futuro -->
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meli 360</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="//unpkg.com/alpinejs" defer></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+</head>
+<body class="bg-gray-50">
+<div x-data="{ sidebarOpen: true }" class="flex h-screen bg-gray-50">
+    <!-- Sidebar -->
+    <aside
+        class="flex-shrink-0 w-64 flex flex-col bg-white border-r border-gray-200 transition-all duration-300"
+        :class="{'-ml-64': !sidebarOpen}"
+    >
+        <div class="h-20 flex items-center justify-center border-b">
+            <h1 class="text-2xl font-bold text-gray-800">🚀 Meli 360</h1>
+        </div>
+        <nav class="flex-1 px-4 py-6 space-y-2">
+            <p class="px-2 mb-2 text-xs font-semibold text-gray-400 uppercase">Principal</p>
+            <a href="/dashboard" class="flex items-center px-4 py-2 text-gray-600 rounded-lg hover:bg-gray-100 hover:text-gray-900 transition-colors <?= ($_SERVER['REQUEST_URI'] === '/dashboard') ? 'bg-indigo-50 text-indigo-600 font-semibold' : '' ?>">
+                <i class="fas fa-home fa-fw mr-3"></i> Visão Geral
+            </a>
+            <a href="/dashboard/analysis" class="flex items-center px-4 py-2 text-gray-600 rounded-lg hover:bg-gray-100 hover:text-gray-900 transition-colors <?= ($_SERVER['REQUEST_URI'] === '/dashboard/analysis') ? 'bg-indigo-50 text-indigo-600 font-semibold' : '' ?>">
+                <i class="fas fa-chart-bar fa-fw mr-3"></i> Análise
+            </a>
+            <a href="/dashboard/responder" class="flex items-center px-4 py-2 text-gray-600 rounded-lg hover:bg-gray-100 hover:text-gray-900 transition-colors <?= ($_SERVER['REQUEST_URI'] === '/dashboard/responder') ? 'bg-indigo-50 text-indigo-600 font-semibold' : '' ?>">
+                <i class="fas fa-robot fa-fw mr-3"></i> Respondedor IA
+            </a>
+            <a href="/dashboard/settings" class="flex items-center px-4 py-2 text-gray-600 rounded-lg hover:bg-gray-100 hover:text-gray-900 transition-colors <?= (strpos($_SERVER['REQUEST_URI'], '/settings') !== false) ? 'bg-indigo-50 text-indigo-600 font-semibold' : '' ?>">
+                <i class="fas fa-cog fa-fw mr-3"></i> Configurações
+            </a>
+
+            <?php if (isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'consultant'): ?>
+                <p class="px-2 mt-6 mb-2 text-xs font-semibold text-gray-400 uppercase">Consultor</p>
+                <a href="/consultant/dashboard" class="flex items-center px-4 py-2 text-gray-600 rounded-lg hover:bg-gray-100 hover:text-gray-900 transition-colors <?= (strpos($_SERVER['REQUEST_URI'], '/consultant') !== false) ? 'bg-indigo-50 text-indigo-600 font-semibold' : '' ?>">
+                    <i class="fas fa-briefcase fa-fw mr-3"></i> Meus Clientes
+                </a>
+            <?php endif; ?>
+
+            <?php if (isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin'): ?>
+                <p class="px-2 mt-6 mb-2 text-xs font-semibold text-gray-400 uppercase">Admin</p>
+                <a href="/admin/dashboard" class="flex items-center px-4 py-2 text-gray-600 rounded-lg hover:bg-gray-100 hover:text-gray-900 transition-colors <?= (strpos($_SERVER['REQUEST_URI'], '/admin') !== false) ? 'bg-indigo-50 text-indigo-600 font-semibold' : '' ?>">
+                    <i class="fas fa-shield-alt fa-fw mr-3"></i> Painel Admin
+                </a>
+            <?php endif; ?>
+        </nav>
+        <div class="p-4 border-t">
+            <a href="/logout" class="flex items-center px-4 py-2 text-gray-600 rounded-lg hover:bg-gray-100 hover:text-gray-900 transition-colors">
+                <i class="fas fa-sign-out-alt fa-fw mr-3"></i> Sair
+            </a>
+        </div>
+    </aside>
+
+    <!-- Content -->
+    <div class="flex-1 flex flex-col overflow-hidden">
+        <header class="flex justify-between items-center p-4 bg-white border-b lg:hidden">
+            <button @click="sidebarOpen = !sidebarOpen" class="text-gray-500 focus:outline-none">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="flex items-center">
+                <span class="text-gray-700"><?= htmlspecialchars($_SESSION['user_email']) ?></span>
             </div>
-        </div>
-        <div class="flex items-center">
-            <span class="text-gray-600 mr-4 hidden sm:inline">Olá, <?php echo htmlspecialchars($_SESSION['user_email']); ?></span>
-            <a href="/logout" class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700">Sair</a>
-        </div>
-    </nav>
-</header>
+        </header>
+        <main class="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-6">
+            <?php if (isset($_SESSION['original_user'])): ?>
+                <div class="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6 rounded-md shadow-sm" role="alert">
+                    <div class="flex">
+                        <div class="py-1"><i class="fas fa-user-secret fa-lg mr-4"></i></div>
+                        <div>
+                            <p class="font-bold">Modo de Personificação Ativo</p>
+                            <p class="text-sm">Você está navegando como <?= htmlspecialchars($_SESSION['user_email']) ?>. <a href="/impersonate/stop" class="font-bold underline hover:text-yellow-800">Clique aqui para retornar à sua conta de administrador.</a></p>
+                        </div>
+                    </div>
+                </div>
+            <?php endif; ?>
