@@ -2,35 +2,43 @@
 include_once BASE_PATH . '/src/Views/layouts/header.phtml';
 ?>
 
-<h1 class="text-3xl font-bold text-gray-800 mb-6">⚙️ Configurações</h1>
+<h1 class="text-3xl font-bold text-gray-800 mb-6">⚙️ Configurações da Conta</h1>
+
+<?php
+// Exibe mensagens flash de sucesso ou erro, se houver
+if (isset($_SESSION['flash_message'])) {
+    $message = $_SESSION['flash_message'];
+    unset($_SESSION['flash_message']);
+    $type = $message['type'] === 'success' ? 'green' : 'red';
+    echo "<div class='bg-{$type}-100 border-l-4 border-{$type}-500 text-{$type}-700 p-4 mb-6 rounded-md' role='alert'>";
+    echo "<p>" . htmlspecialchars($message['message']) . "</p>";
+    echo "</div>";
+}
+?>
 
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
     <!-- Coluna de Perfil -->
     <div class="lg:col-span-2 bg-white p-6 rounded-lg shadow-md">
         <h2 class="text-xl font-semibold mb-4">👤 Meu Perfil</h2>
 
-        <?php if (has_flash_message('settings_success')): ?>
-            <div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-md" role="alert">
-                <p><?= get_flash_message('settings_success'); ?></p>
-            </div>
-        <?php endif; ?>
-        <?php if (has_flash_message('settings_error')): ?>
-            <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-md" role="alert">
-                <p><?= get_flash_message('settings_error'); ?></p>
-            </div>
-        <?php endif; ?>
-
         <form action="/dashboard/settings/update" method="POST" class="space-y-6">
             <?= generate_csrf_token_input() ?>
             
             <div>
                 <label for="name" class="block text-sm font-medium text-gray-700">Nome Completo</label>
-                <input type="text" name="name" id="name" value="<?= htmlspecialchars($user['name']) ?>" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                <input type="text" name="name" id="name" value="<?= htmlspecialchars($user['name']) ?>" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" required>
             </div>
 
             <div>
-                <label for="whatsapp" class="block text-sm font-medium text-gray-700">WhatsApp (com DDD)</label>
-                <input type="tel" name="whatsapp" id="whatsapp" value="<?= htmlspecialchars(preg_replace('/[^0-9]/', '', $user['whatsapp_jid'] ?? '')) ?>" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="11987654321">
+                <label for="email" class="block text-sm font-medium text-gray-700">E-mail</label>
+                <input type="email" name="email" id="email" value="<?= htmlspecialchars($user['email']) ?>" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm bg-gray-100 cursor-not-allowed" readonly>
+                <p class="text-xs text-gray-500 mt-1">O e-mail não pode ser alterado.</p>
+            </div>
+
+            <div>
+                <label for="whatsapp" class="block text-sm font-medium text-gray-700">Número do WhatsApp</label>
+                <input type="text" name="whatsapp" id="whatsapp" value="<?= htmlspecialchars($user['whatsapp_number'] ?? '') ?>" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="(XX) XXXXX-XXXX">
+                <p class="text-xs text-gray-500 mt-1">Necessário para receber notificações e usar o Respondedor IA.</p>
             </div>
 
             <div class="border-t pt-6">
@@ -52,8 +60,8 @@ include_once BASE_PATH . '/src/Views/layouts/header.phtml';
                 </div>
             </div>
 
-            <div class="text-right">
-                <button type="submit" class="bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-700 transition-colors">
+            <div class="flex justify-end">
+                <button type="submit" class="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
                     Salvar Alterações
                 </button>
             </div>

@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Models\User;
 use App\Models\Plan;
+use App\Core\Validator;
 
 class SettingsController
 {
@@ -17,14 +18,22 @@ class SettingsController
         $user = $userModel->findById($_SESSION['user_id']);
         $plans = $planModel->getActivePlans(); // Para futura exibição de planos
 
+        if (!$user) {
+            // Medida de segurança, embora improvável de acontecer com um usuário logado.
+            set_flash_message('error', 'Usuário não encontrado.');
+            header('Location: /dashboard');
+            exit();
+        }
+
         view('settings.index', [
             'user' => $user,
             'plans' => $plans
         ]);
+        exit();
     }
 
     /**
-     * Atualiza os dados do perfil do usuário.
+     * Atualiza as informações do usuário.
      */
     public function update(): void
     {

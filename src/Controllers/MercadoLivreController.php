@@ -48,30 +48,57 @@ class MercadoLivreController
             exit;
         }
 
-        $code = $_GET['code'];
         $mlUserModel = new MercadoLivreUser();
-        $tokenData = $mlUserModel->exchangeCodeForTokens($code);
-        
-        if (!$tokenData) {
-             set_flash_message('error', 'Erro ao obter os tokens do Mercado Livre. Tente novamente.');
-             header('Location: /dashboard');
-             exit;
-        }
-        
-        $userData = $mlUserModel->getUserInfo($tokenData['access_token']);
-        
-        $mlUserModel->saveOrUpdateTokens(
-            $_SESSION['user_id'],
-            $tokenData['user_id'],
-            $userData['nickname'] ?? 'N/A',
-            $tokenData['access_token'],
-            $tokenData['refresh_token'],
-            $tokenData['expires_in']
-        );
+        $tokenData = $mlUserModel->exchangeCodeForTokens($_GET['code']);
 
-        set_flash_message('success', 'Conta do Mercado Livre conectada com sucesso!');
-        header('Location: /dashboard');
-        exit;
+        if ($tokenData && isset($tokenData['access_token'])) {
+            $accessToken = $tokenData['access_token'];
+
+            // NOVA ETAPA: Buscar detalhes do usuário para obter o nickname
+            $nickname = $this->fetchNickname($accessToken);
+            $mlUserId = $tokenData['user_id'];
+
+            // Salva tudo no banco de dados
+            $mlUserModel->saveOrUpdateTokens(
+                $_SESSION['user_id'],
+                $mlUserId,
+                $accessToken,
+                $tokenData['refresh_token'],
+                $tokenData['expires_in'],
+                $nickname // Passa o nickname para o método de salvamento
+            );
+
+            set_flash_message('success', "Conta do Mercado Livre '{$nickname}' conectada com sucesso!");
+            header('Location: /dashboard');
+            exit;
+        } else {
+            set_flash_message('error', 'Erro ao obter os tokens do Mercado Livre. Tente novamente.');
+            header('Location: /dashboard');
+            exit;
+        }
+    }
+
+    /**
+     * Busca o nickname do usuário na API do Mercado Livre.
+     *
+     * @param string $accessToken
+     * @return string|null
+     */
+    private function fetchNickname(string $accessToken): ?string
+    {
+        $ch = curl_init('https://api.mercadolibre.com/users/me');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . $accessToken
+        ]);
+        $response = curl_exec($ch);
+        curl_close($ch);
+
+        if ($response) {
+            $data = json_decode($response, true);
+            return $data['nickname'] ?? null;
+        }
+        return null;
     }
 
     /**

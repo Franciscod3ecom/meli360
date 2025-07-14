@@ -55,23 +55,40 @@ class MercadoLivreUser
         return json_decode($response, true);
     }
 
-    public function saveOrUpdateTokens(int $saasUserId, int $mlUserId, string $nickname, string $accessToken, string $refreshToken, int $expiresIn): bool
+    /**
+     * Salva ou atualiza os tokens de um usuário do Mercado Livre no banco de dados.
+     *
+     * @param int    $saasUserId      ID do usuário no sistema SaaS.
+     * @param int    $mlUserId        ID do usuário no Mercado Livre.
+     * @param string $accessToken     Token de acesso.
+     * @param string $refreshToken    Token para renovação.
+     * @param int    $expiresIn       Tempo de expiração em segundos.
+     * @param string|null $nickname   Nickname do usuário no Mercado Livre.
+     * @return bool
+     */
+    public function saveOrUpdateTokens(int $saasUserId, int $mlUserId, string $accessToken, string $refreshToken, int $expiresIn, ?string $nickname): bool
     {
         $encryptedAccessToken = Crypto::encrypt($accessToken, $this->key);
         $encryptedRefreshToken = Crypto::encrypt($refreshToken, $this->key);
-        $expiresAt = (new \DateTimeImmutable())->modify("+" . $expiresIn . " seconds")->format('Y-m-d H:i:s');
+        $expiresAt = date('Y-m-d H:i:s', time() + $expiresIn);
 
-        $sql = "INSERT INTO mercadolibre_users (saas_user_id, ml_user_id, nickname, access_token, refresh_token, token_expires_at, is_active)
-                VALUES (:saas_user_id, :ml_user_id, :nickname, :access_token, :refresh_token, :expires_at, 1)
+        $sql = "INSERT INTO mercadolibre_users (saas_user_id, ml_user_id, nickname, access_token, refresh_token, expires_at, sync_status)
+                VALUES (:saas_user_id, :ml_user_id, :nickname, :access_token, :refresh_token, :expires_at, 'NOT_SYNCED')
                 ON DUPLICATE KEY UPDATE
-                    saas_user_id = VALUES(saas_user_id), nickname = VALUES(nickname), access_token = VALUES(access_token),
-                    refresh_token = VALUES(refresh_token), token_expires_at = VALUES(token_expires_at),
-                    is_active = 1, updated_at = NOW()";
-        
+                    access_token = VALUES(access_token),
+                    refresh_token = VALUES(refresh_token),
+                    expires_at = VALUES(expires_at),
+                    nickname = VALUES(nickname),
+                    sync_status = IF(sync_status = 'COMPLETED', 'NOT_SYNCED', sync_status)";
+
         $stmt = $this->db->prepare($sql);
         return $stmt->execute([
-            ':saas_user_id' => $saasUserId, ':ml_user_id' => $mlUserId, ':nickname' => $nickname,
-            ':access_token' => $encryptedAccessToken, ':refresh_token' => $encryptedRefreshToken, ':expires_at' => $expiresAt
+            ':saas_user_id' => $saasUserId,
+            ':ml_user_id' => $mlUserId,
+            ':nickname' => $nickname,
+            ':access_token' => $encryptedAccessToken,
+            ':refresh_token' => $encryptedRefreshToken,
+            ':expires_at' => $expiresAt
         ]);
     }
 
@@ -86,6 +103,15 @@ class MercadoLivreUser
     {
         $stmt = $this->db->prepare("SELECT * FROM mercadolibre_users WHERE ml_user_id = :ml_user_id LIMIT 1");
         $stmt->execute([':ml_user_id' => $mlUserId]);
+        return $stmt->fetch();
+    }
+
+    /**
+     * NOVO: Busca uma conexão específica garantindo que ela pertence ao usuário SaaS.
+     */
+    public function findBySaasUserIdAndMlUserId(int $saasUserId, int $mlUserId): array|false {
+        $stmt = $this->db->prepare("SELECT * FROM mercadolibre_users WHERE saas_user_id = :saas_id AND ml_user_id = :ml_id LIMIT 1");
+        $stmt->execute([':saas_id' => $saasUserId, ':ml_id' => $mlUserId]);
         return $stmt->fetch();
     }
     
@@ -124,24 +150,27 @@ class MercadoLivreUser
 
     public function getValidAccessToken(int $saasUserId, int $mlUserId): ?string
     {
-        log_message("Buscando token para ML User ID: {$mlUserId}", "DEBUG");
-        $connection = $this->findByMlUserId($mlUserId);
-        if (!$connection || $connection['saas_user_id'] != $saasUserId) {
-            log_message("Conexão não encontrada ou não pertence ao usuário SaaS ID {$saasUserId} para ML User ID: {$mlUserId}", "ERROR");
+        log_message("TOKEN_MANAGER: Iniciando busca de token para ML User ID: {$mlUserId} (SaaS User: {$saasUserId}).");
+        $connection = $this->findBySaasUserIdAndMlUserId($saasUserId, $mlUserId);
+        
+        if (!$connection) {
+            log_message("TOKEN_MANAGER: Conexão não encontrada para a combinação saas_user_id/ml_user_id.", "ERROR");
             return null;
         }
 
         $expiresAt = new \DateTime($connection['token_expires_at']);
-        if ($expiresAt < (new \DateTime())->modify('+5 minutes')) {
-            log_message("Token para {$mlUserId} expirado ou perto de expirar. Renovando...");
+        if ($expiresAt < (new \DateTime())->modify('+10 minutes')) {
+            log_message("TOKEN_MANAGER: Token para ml_user_id={$mlUserId} expirado ou perto de expirar. Tentando renovar...");
             return $this->refreshAndGetNewToken($connection);
         }
 
         try {
-            log_message("Token para {$mlUserId} válido. Descriptografando...", "DEBUG");
-            return Crypto::decrypt($connection['access_token'], $this->key);
+            log_message("TOKEN_MANAGER: Token para ml_user_id={$mlUserId} ainda é válido. Descriptografando...");
+            $token = Crypto::decrypt($connection['access_token'], $this->key);
+            log_message("TOKEN_MANAGER: Token descriptografado com sucesso para ml_user_id={$mlUserId}.");
+            return $token;
         } catch (\Exception $e) {
-            log_message("Falha ao descriptografar access token para {$mlUserId}: " . $e->getMessage(), "ERROR");
+            log_message("TOKEN_MANAGER: Falha CRÍTICA ao descriptografar access_token válido: " . $e->getMessage(), "CRITICAL");
             return null;
         }
     }
@@ -151,33 +180,41 @@ class MercadoLivreUser
         try {
             $refreshToken = Crypto::decrypt($connection['refresh_token'], $this->key);
         } catch (\Exception $e) {
-            log_message("Falha ao descriptografar refresh token para {$connection['ml_user_id']}: " . $e->getMessage(), "ERROR");
+            log_message("TOKEN_MANAGER: Falha CRÍTICA ao descriptografar refresh_token para ml_user_id={$connection['ml_user_id']}: " . $e->getMessage(), "CRITICAL");
             return null;
         }
 
         $tokenUrl = 'https://api.mercadolibre.com/oauth/token';
         $postData = http_build_query([
-            'grant_type'    => 'refresh_token', 'client_id' => $_ENV['ML_APP_ID'],
-            'client_secret' => $_ENV['ML_SECRET_KEY'], 'refresh_token' => $refreshToken,
+            'grant_type' => 'refresh_token',
+            'client_id' => $_ENV['ML_APP_ID'],
+            'client_secret' => $_ENV['ML_SECRET_KEY'],
+            'refresh_token' => $refreshToken,
         ]);
-        
-        $ch = curl_init();
-        curl_setopt_array($ch, [CURLOPT_URL => $tokenUrl, CURLOPT_POST => 1, CURLOPT_POSTFIELDS => $postData, CURLOPT_RETURNTRANSFER => true]);
+
+        $ch = curl_init($tokenUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => 1, CURLOPT_POSTFIELDS => $postData, CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => ['Accept: application/json', 'Content-Type: application/x-www-form-urlencoded']
+        ]);
         $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+
         $tokenData = json_decode($response, true);
-        
-        if (isset($tokenData['access_token'])) {
-            log_message("Token para {$connection['ml_user_id']} renovado com sucesso.");
+
+        if ($httpCode === 200 && isset($tokenData['access_token'])) {
+            log_message("TOKEN_MANAGER: Refresh para ml_user_id={$connection['ml_user_id']} bem-sucedido. Salvando novos tokens.");
             $this->saveOrUpdateTokens(
                 $connection['saas_user_id'], $connection['ml_user_id'], $connection['nickname'],
                 $tokenData['access_token'], $tokenData['refresh_token'], $tokenData['expires_in']
             );
             return $tokenData['access_token'];
+        } else {
+            log_message("TOKEN_MANAGER: Falha no refresh da API para ml_user_id={$connection['ml_user_id']}. HTTP: {$httpCode}. Resposta: {$response}", "ERROR");
+            $this->updateSyncStatusByMlUserId($connection['ml_user_id'], 'FAILED', 'Falha ao renovar token de acesso. Verifique a conexão da conta.');
+            return null;
         }
-        
-        log_message("Falha ao renovar token para {$connection['ml_user_id']}. Resposta da API: " . $response, "ERROR");
-        return null;
     }
     
     public function updateAsaasCustomerId(int $userId, string $asaasCustomerId): bool

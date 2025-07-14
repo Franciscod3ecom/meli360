@@ -42,11 +42,29 @@ if (!function_exists('get_flash_message')) {
      */
     function get_flash_message(string $key): ?string
     {
-        if (has_flash_message($key)) {
+        if (isset($_SESSION['flash_messages'][$key])) {
             $message = $_SESSION['flash_messages'][$key];
             unset($_SESSION['flash_messages'][$key]);
             return $message;
         }
         return null;
+    }
+}
+
+if (!function_exists('display_flash_message')) {
+    /**
+     * Exibe uma mensagem flash se ela existir na sessão, com formatação.
+     *
+     * @param string $key A chave da mensagem a ser exibida.
+     * @param string $cssClasses As classes CSS para o container da mensagem.
+     */
+    function display_flash_message(string $key, string $cssClasses = ''): void
+    {
+        if (has_flash_message($key)) {
+            $message = get_flash_message($key);
+            echo "<div class='p-4 mb-4 text-sm rounded-lg {$cssClasses}' role='alert'>";
+            echo htmlspecialchars($message);
+            echo "</div>";
+        }
     }
 }

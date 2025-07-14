@@ -10,7 +10,6 @@ use App\Controllers\AdminController;
 use App\Controllers\WebhookController;
 use App\Controllers\AccountController;
 use App\Controllers\SettingsController;
-use App\Controllers\ImpersonationController;
 use App\Controllers\BillingController;
 
 // --- ROTAS PÚBLICAS (acessíveis sem login) ---
@@ -81,8 +80,8 @@ $router->post('/dashboard/settings/update', SettingsController::class . '@update
 $router->get('/billing/plans', BillingController::class . '@plans');
 $router->post('/billing/subscribe/(\d+)', BillingController::class . '@subscribe');
 
-// Personificação
-$router->get('/impersonate/stop', ImpersonationController::class . '@stop');
+// Personificação - Agora aponta para o AdminController
+$router->get('/admin/impersonate/stop', AdminController::class . '@impersonateStop');
 
 // --- ROTAS DE ADMIN ---
 
@@ -102,7 +101,8 @@ $router->before('GET|POST', '/admin/.*', function() {
 $router->get('/admin/dashboard', AdminController::class . '@dashboard');
 $router->get('/admin/user/(\d+)', AdminController::class . '@viewUser');
 $router->post('/admin/user/(\d+)/update', AdminController::class . '@updateUser');
-$router->get('/admin/impersonate/start/(\d+)', ImpersonationController::class . '@start');
+// Rota de personificação corrigida para apontar para o AdminController
+$router->get('/admin/impersonate/start/(\d+)', AdminController::class . '@impersonateStart');
 $router->get('/admin/sync', AdminController::class . '@triggerSync');
 
 // --- ROTA DE FALLBACK (404) ---

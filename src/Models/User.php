@@ -91,6 +91,46 @@ class User
     }
 
     /**
+     * Atualiza as configurações de um usuário (nome e WhatsApp).
+     *
+     * @param int $userId O ID do usuário a ser atualizado.
+     * @param string $name O novo nome do usuário.
+     * @param string|null $whatsapp O novo número de WhatsApp.
+     * @return bool Retorna true em caso de sucesso, false em caso de falha.
+     */
+    public function updateSettings(int $userId, string $name, ?string $whatsapp): bool
+    {
+        $sql = "UPDATE saas_users SET name = :name, whatsapp_number = :whatsapp WHERE id = :id";
+        $stmt = $this->db->prepare($sql);
+        
+        return $stmt->execute([
+            ':id' => $userId,
+            ':name' => $name,
+            ':whatsapp' => $whatsapp
+        ]);
+    }
+
+    /**
+     * Atualiza o status (ativo/inativo) e o papel de um usuário.
+     *
+     * @param int $userId O ID do usuário a ser atualizado.
+     * @param int $isActive O novo status (1 para ativo, 0 para inativo).
+     * @param string $role O novo papel do usuário.
+     * @return bool Retorna true em caso de sucesso, false em caso de falha.
+     */
+    public function updateUserStatusAndRole(int $userId, int $isActive, string $role): bool
+    {
+        $sql = "UPDATE saas_users SET is_active = :is_active, role = :role WHERE id = :id";
+        $stmt = $this->db->prepare($sql);
+
+        return $stmt->execute([
+            ':id' => $userId,
+            ':is_active' => $isActive,
+            ':role' => $role
+        ]);
+    }
+
+    /**
      * Busca todos os usuários e suas conexões com o Mercado Livre.
      *
      * @return array

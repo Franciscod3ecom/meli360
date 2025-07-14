@@ -28,66 +28,86 @@ class ImpersonationController
         // Se for um consultor, verifica se o alvo é seu cliente.
         if ($_SESSION['user_role'] === 'consultant') {
             $clients = $userModel->findClientsByConsultantId($_SESSION['user_id']);
-            $clientIds = array_column($clients, 'id');
-            if (!in_array($targetUserId, $clientIds)) {
-                $this->forbidden("Você não tem permissão para personificar este usuário.");
+            $isClient = false;
+            foreach ($clients as $client) {
+                if ($client['id'] === $targetUserId) {
+                    $isClient = true;
+                    break;
+                }
+            }
+            if (!$isClient) {
+                $this->forbidden("Consultores só podem personificar seus próprios clientes.");
             }
         }
 
-        // Salva a sessão original
+        // Salva os dados do usuário original (admin/consultor) na sessão.
         $_SESSION['original_user'] = [
-            'user_id' => $_SESSION['user_id'],
-            'user_email' => $_SESSION['user_email'],
-            'user_role' => $_SESSION['user_role'],
+            'id' => $_SESSION['user_id'],
+            'email' => $_SESSION['user_email'],
+            'role' => $_SESSION['user_role']
         ];
 
-        // Sobrescreve a sessão atual com os dados do usuário alvo
-        (new AuthController())->createUserSession($targetUser['id'], $targetUser['email'], $targetUser['role']);
+        // Define a sessão para o usuário alvo.
+        $_SESSION['user_id'] = $targetUser['id'];
+        $_SESSION['user_email'] = $targetUser['email'];
+        $_SESSION['user_role'] = $targetUser['role'];
         
+        // Limpa o ID da conta ML ativa para evitar inconsistências.
+        unset($_SESSION['active_ml_account_id']);
+
+        set_flash_message('success', "Você agora está navegando como {$targetUser['email']}.");
         header('Location: /dashboard');
-        exit;
+        exit();
     }
 
     /**
-     * Para a sessão de personificação e retorna ao usuário original.
+     * Para a personificação e restaura a sessão original.
      */
     public function stop(): void
     {
         if (!isset($_SESSION['original_user'])) {
             header('Location: /dashboard');
-            exit;
+            exit();
         }
 
         $originalUser = $_SESSION['original_user'];
-        $originalRole = $originalUser['user_role'];
 
-        // Restaura a sessão original
-        (new AuthController())->createUserSession($originalUser['user_id'], $originalUser['email'], $originalUser['user_role']);
+        // Restaura a sessão original.
+        $_SESSION['user_id'] = $originalUser['id'];
+        $_SESSION['user_email'] = $originalUser['email'];
+        $_SESSION['user_role'] = $originalUser['role'];
+
+        // Limpa os dados da personificação.
         unset($_SESSION['original_user']);
+        unset($_SESSION['active_ml_account_id']);
 
-        // Redireciona para o painel correto
-        if ($originalRole === 'admin') {
+        set_flash_message('success', 'Você retornou à sua conta original.');
+        
+        if ($originalUser['role'] === 'admin') {
             header('Location: /admin/dashboard');
-        } elseif ($originalRole === 'consultant') {
-            header('Location: /consultant/dashboard');
         } else {
             header('Location: /dashboard');
         }
-        exit;
+        exit();
     }
 
-    private function forbidden(string $message = 'Acesso Negado.')
+    /**
+     * Redireciona com uma mensagem de erro.
+     */
+    private function redirectWithError(string $message): void
+    {
+        set_flash_message('error', $message);
+        header('Location: /admin/dashboard');
+        exit();
+    }
+
+    /**
+     * Exibe uma página de acesso negado.
+     */
+    private function forbidden(string $message = 'Você não tem permissão para realizar esta ação.'): void
     {
         http_response_code(403);
         view('errors.403', ['message' => $message]);
-        exit;
-    }
-
-    private function redirectWithError(string $message)
-    {
-        set_flash_message('admin_error', $message);
-        $redirect_url = ($_SESSION['user_role'] === 'admin') ? '/admin/dashboard' : '/consultant/dashboard';
-        header('Location: ' . $redirect_url);
-        exit;
+        exit();
     }
 }

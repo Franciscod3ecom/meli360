@@ -42,10 +42,11 @@ class Anuncio
         $allItemIds = [];
         $scrollId = null;
         $page = 1;
+        $tokenPreview = substr($accessToken, 0, 8) . '...';
 
         do {
             $url = "https://api.mercadolibre.com/users/{$mlUserId}/items/search?search_type=scan&limit=100" . ($scrollId ? "&scroll_id=" . urlencode($scrollId) : "");
-            log_message("SYNC_API: [Página {$page}] Chamando URL para ML User ID {$mlUserId}");
+            log_message("SYNC_API: [Página {$page}] Chamando URL: {$url} com Token: {$tokenPreview}");
 
             $ch = curl_init($url);
             curl_setopt_array($ch, [
@@ -61,11 +62,14 @@ class Anuncio
             
             $data = json_decode($response, true);
 
+            // LOG DETALHADO DA RESPOSTA
+            log_message("SYNC_API: [Página {$page}] Resposta recebida. HTTP: {$httpCode}. cURL Error: {$error}. Resposta Bruta: {$response}");
+
             if ($httpCode !== 200 || !isset($data['results'])) {
-                $errorMessage = "SYNC_API: Falha na API de busca de IDs. HTTP: {$httpCode}. cURL Error: {$error}. Resposta: {$response}";
-                log_message($errorMessage, 'CRITICAL');
-                $progressCallback("Falha ao comunicar com a API do ML (HTTP: $httpCode).", "ERROR");
-                throw new Exception($errorMessage);
+                $errorMessage = "Falha ao buscar IDs na API (HTTP: $httpCode). Verifique os logs para a resposta completa.";
+                log_message("SYNC_API: {$errorMessage}", 'ERROR');
+                $progressCallback($errorMessage, "ERROR");
+                break; // Interrompe o loop em caso de falha
             }
 
             $itemIds = $data['results'] ?? [];
@@ -77,7 +81,7 @@ class Anuncio
             $progressCallback(count($allItemIds) . " de {$totalApi} IDs de anúncios encontrados...");
 
             $page++;
-            sleep(1);
+            sleep(1); // Evita sobrecarregar a API
 
         } while ($scrollId);
 
@@ -434,6 +438,18 @@ class Anuncio
         return (int) $stmt->fetchColumn();
     }
 
+    /**
+     * NOVO: Conta o total de anúncios de uma conta ML, independente do status.
+     * Usado para calcular o progresso da sincronização.
+     * @param int $mlUserId
+     * @return int
+     */
+    public function countTotalByMlUserId(int $mlUserId): int
+    {
+        $stmt = $this->db->prepare("SELECT COUNT(*) FROM anuncios WHERE ml_user_id = :ml_user_id");
+        $stmt->execute([':ml_user_id' => $mlUserId]);
+        return (int) $stmt->fetchColumn();
+    }
     /**
      * Conta o total de anúncios de uma conta ML com determinados status.
      * @param int $mlUserId

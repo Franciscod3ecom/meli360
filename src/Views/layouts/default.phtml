@@ -1,0 +1,16 @@
+<?php
+/**
+ * Layout Padrão da Aplicação
+ * Este arquivo envolve o conteúdo da view com o cabeçalho e rodapé.
+ * A variável $viewPath é fornecida pela função view().
+ */
+require_once BASE_PATH . '/src/Views/layouts/header.phtml';
+
+// Renderiza o conteúdo da view específica
+if (isset($viewPath) && file_exists($viewPath)) {
+    require $viewPath;
+} else {
+    echo "<main class='container mx-auto p-8'><p class='text-red-500'>Erro: Conteúdo da view não pôde ser carregado.</p></main>";
+}
+
+require_once BASE_PATH . '/src/Views/layouts/footer.phtml';

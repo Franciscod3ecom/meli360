@@ -2,139 +2,155 @@
 namespace App\Models;
 
 /**
- * Classe para interagir com a API do Mercado Livre.
- * Simplifica a execução de requisições HTTP para os endpoints da API.
+ * Classe centralizadora para todas as comunicações com a API do Mercado Livre.
+ * Encapsula a lógica de cURL, tratamento de erros e rate limiting.
  */
 class MercadoLivreApi
 {
-    private const API_BASE_URL = 'https://api.mercadolibre.com';
     private string $accessToken;
+    private int $retries = 0;
+    private const MAX_RETRIES = 3;
+    private const API_BASE_URL = 'https://api.mercadolibre.com';
 
-    /**
-     * Construtor da classe.
-     * @param string $accessToken O token de acesso para autenticar as requisições.
-     */
     public function __construct(string $accessToken)
     {
         $this->accessToken = $accessToken;
     }
 
     /**
-     * Faz uma requisição cURL para um endpoint da API do ML.
+     * Faz uma chamada genérica para a API do ML, com tratamento de Rate Limit.
      *
-     * @param string $url A URL completa da requisição.
-     * @param string $method O método HTTP (GET, POST, etc.).
-     * @param array $extraHeaders Cabeçalhos adicionais.
-     * @param mixed $postData Dados para requisições POST/PUT.
-     * @return array Retorna o código HTTP e a resposta decodificada.
+     * @param string $url A URL completa do endpoint.
+     * @param array $options Opções adicionais do cURL.
+     * @return array|null O resultado da API decodificado ou null em caso de erro.
      */
-    private function makeRequest(string $url, string $method = 'GET', array $extraHeaders = [], $postData = null): array
+    private function makeRequest(string $url, array $options = []): ?array
     {
-        $ch = curl_init();
-        $headers = array_merge(['Authorization: Bearer ' . $this->accessToken], $extraHeaders);
-
-        curl_setopt_array($ch, [
-            CURLOPT_URL => $url,
-            CURLOPT_CUSTOMREQUEST => $method,
+        $ch = curl_init($url);
+        
+        $defaultOptions = [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => $headers,
-            CURLOPT_CONNECTTIMEOUT => 10, // Timeout de conexão
-            CURLOPT_TIMEOUT => 30, // Timeout total da requisição
-        ]);
+            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $this->accessToken, 'Accept: application/json'],
+            CURLOPT_TIMEOUT => 30,
+        ];
 
-        if ($postData) {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($postData));
-        }
-
+        curl_setopt_array($ch, $options + $defaultOptions);
+        
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);
         curl_close($ch);
 
-        if ($error) {
-            log_message("cURL Error for URL {$url}: {$error}", 'ERROR');
-            return ['httpCode' => 500, 'response' => null, 'error' => $error];
+        if ($httpCode === 429 && $this->retries < self::MAX_RETRIES) { // Too Many Requests
+            $this->retries++;
+            $sleepTime = 5 * $this->retries; // Pausa incremental
+            log_message('API_RATE_LIMIT', "Limite da API atingido na URL {$url}. Pausando por {$sleepTime} segundos. Tentativa {$this->retries}/" . self::MAX_RETRIES);
+            sleep($sleepTime);
+            return $this->makeRequest($url, $options); // Tenta novamente
         }
 
-        return ['httpCode' => $httpCode, 'response' => json_decode($response, true)];
+        if ($httpCode >= 400) {
+            log_message('API_ERROR', "HTTP {$httpCode} na URL {$url}. Erro cURL: {$error}. Resposta: {$response}");
+            return null;
+        }
+        
+        $this->retries = 0; // Reseta o contador em caso de sucesso
+        return json_decode($response, true);
     }
 
     /**
-     * Busca os detalhes de múltiplos itens de uma vez.
+     * Busca todos os IDs de anúncios de um usuário usando o sistema de scroll.
      *
-     * @param array $itemIds Array com os IDs dos itens.
-     * @param array $attributes Array com os atributos desejados.
-     * @return array Retorna um array de respostas, uma para cada item.
+     * @param int $mlUserId
+     * @return array|null
      */
-    public function getMultipleItemDetails(array $itemIds, array $attributes): array
+    public function fetchAllItemIds(int $mlUserId): ?array
     {
-        if (empty($itemIds)) {
-            return [];
+        $allItemIds = [];
+        $url = self::API_BASE_URL . "/users/{$mlUserId}/items/search?limit=50";
+        
+        do {
+            $data = $this->makeRequest($url);
+            if (!isset($data['results']) || !is_array($data['results'])) {
+                log_message('API_ERROR', "Erro ao buscar IDs de anúncios para o usuário {$mlUserId}. Resposta inválida.");
+                return null; // Interrompe se a resposta for inválida
+            }
+
+            $allItemIds = array_merge($allItemIds, $data['results']);
+            
+            $scrollId = $data['scroll_id'] ?? null;
+            if ($scrollId) {
+                $url = self::API_BASE_URL . "/users/{$mlUserId}/items/search?scroll_id={$scrollId}";
+            }
+
+        } while ($scrollId && !empty($data['results']));
+
+        return $allItemIds;
+    }
+
+    /**
+     * Busca detalhes de múltiplos itens, respeitando o limite de 20 IDs por chamada.
+     *
+     * @param array $itemIds
+     * @return array|null
+     */
+    public function fetchItemsDetails(array $itemIds): ?array
+    {
+        if (empty($itemIds) || count($itemIds) > 20) {
+            log_message('API_LOGIC_ERROR', 'Tentativa de buscar detalhes de mais de 20 itens em uma chamada.');
+            return null;
+        }
+        
+        $idsString = implode(',', $itemIds);
+        $attributes = 'id,title,price,available_quantity,status,permalink,thumbnail,date_created,last_updated,health,shipping,category_id,pictures';
+        $url = self::API_BASE_URL . "/items?ids={$idsString}&attributes={$attributes}";
+        
+        return $this->makeRequest($url);
+    }
+
+    /**
+     * Busca visitas de múltiplos itens, respeitando o limite de 50 IDs por chamada.
+     *
+     * @param array $itemIds
+     * @return array|null
+     */
+    public function fetchItemsVisits(array $itemIds): ?array
+    {
+        if (empty($itemIds) || count($itemIds) > 50) {
+            log_message('API_LOGIC_ERROR', 'Tentativa de buscar visitas de mais de 50 itens em uma chamada.');
+            return null;
         }
 
         $idsString = implode(',', $itemIds);
-        $attributesString = implode(',', $attributes);
-        $url = self::API_BASE_URL . "/items?ids={$idsString}&attributes={$attributesString}";
+        $url = self::API_BASE_URL . "/visits/items?ids={$idsString}";
 
-        $result = $this->makeRequest($url);
-
-        // A API retorna um array de resultados. Cada resultado tem um 'code' e um 'body'.
-        // Se a chamada geral falhar (ex: token inválido), retorna um array vazio.
-        return $result['response'] ?? [];
+        return $this->makeRequest($url);
     }
 
     /**
-     * Executa múltiplas requisições GET em paralelo.
+     * Busca opções de frete para um único item.
      *
-     * @param array $urls Um array associativo de 'key' => 'url'.
-     * @return array Um array associativo de 'key' => 'response_body'.
+     * @param string $itemId
+     * @return array|null
      */
-    public function getParallel(array $urls): array
+    public function fetchShippingOptions(string $itemId, ?string $zipCode = null): ?array
     {
-        if (empty($urls)) {
-            return [];
+        $url = self::API_BASE_URL . "/items/{$itemId}/shipping_options";
+        if ($zipCode) {
+            $url .= "?zip_code={$zipCode}";
         }
+        return $this->makeRequest($url);
+    }
 
-        $multiHandle = curl_multi_init();
-        $curlHandles = [];
-        $results = [];
-        $headers = ['Authorization: Bearer ' . $this->accessToken];
-
-        // Prepara cada handle cURL
-        foreach ($urls as $key => $url) {
-            $ch = curl_init($url);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_HTTPHEADER => $headers,
-                CURLOPT_CONNECTTIMEOUT => 10,
-                CURLOPT_TIMEOUT => 30,
-            ]);
-            $curlHandles[$key] = $ch;
-            curl_multi_add_handle($multiHandle, $ch);
-        }
-
-        // Executa as requisições
-        $running = null;
-        do {
-            curl_multi_exec($multiHandle, $running);
-            curl_multi_select($multiHandle); // Aguarda por atividade
-        } while ($running > 0);
-
-        // Coleta os resultados
-        foreach ($curlHandles as $key => $ch) {
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            if ($httpCode === 200) {
-                $results[$key] = json_decode(curl_multi_getcontent($ch), true);
-            } else {
-                $results[$key] = null; // Falha na requisição específica
-                log_message("Parallel GET failed for URL {$urls[$key]} with HTTP code {$httpCode}", 'WARNING');
-            }
-            curl_multi_remove_handle($multiHandle, $ch);
-            curl_close($ch);
-        }
-
-        curl_multi_close($multiHandle);
-
-        return $results;
+    /**
+     * Busca detalhes de uma categoria para entender suas regras.
+     *
+     * @param string $categoryId
+     * @return array|null
+     */
+    public function fetchCategoryDetails(string $categoryId): ?array
+    {
+        $url = self::API_BASE_URL . "/categories/{$categoryId}?attributes=settings";
+        return $this->makeRequest($url);
     }
 }

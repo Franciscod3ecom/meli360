@@ -43,68 +43,90 @@ class AdminController
     }
 
     /**
+     * Atualiza os dados de um usuário (status, papel, etc.).
+     */
+    public function updateUser(int $userId): void
+    {
+        $userModel = new User();
+        $isActive = isset($_POST['is_active']) ? 1 : 0;
+        $role = $_POST['role'] ?? 'user';
+
+        // Validação simples para o papel
+        if (!in_array($role, ['user', 'consultant', 'admin'])) {
+            set_flash_message('error', 'Papel de usuário inválido.');
+            header("Location: /admin/user/{$userId}");
+            exit();
+        }
+
+        $success = $userModel->updateUserStatusAndRole($userId, $isActive, $role);
+
+        if ($success) {
+            set_flash_message('success', 'Usuário atualizado com sucesso.');
+        } else {
+            set_flash_message('error', 'Falha ao atualizar o usuário.');
+        }
+
+        header("Location: /admin/user/{$userId}");
+        exit();
+    }
+
+    /**
      * Inicia a personificação de um usuário.
+     * O ID do admin original é salvo na sessão para poder retornar.
      */
     public function impersonateStart(int $userId): void
     {
         $userModel = new User();
         $targetUser = $userModel->findById($userId);
 
-        if ($targetUser && $_SESSION['user_role'] === 'admin') {
-            $_SESSION['original_user'] = [
-                'user_id' => $_SESSION['user_id'],
-                'user_email' => $_SESSION['user_email'],
-                'user_role' => $_SESSION['user_role'],
-            ];
-            (new AuthController())->createUserSession($targetUser['id'], $targetUser['email'], $targetUser['role']);
+        // Só permite se o usuário atual for admin e não estiver já personificando
+        if ($targetUser && $_SESSION['user_role'] === 'admin' && !isset($_SESSION['original_user_id'])) {
+            // Salva o estado original do admin
+            $_SESSION['original_user_id'] = $_SESSION['user_id'];
+            $_SESSION['original_user_role'] = $_SESSION['user_role'];
+
+            // Assume a identidade do usuário alvo
+            $_SESSION['user_id'] = $targetUser['id'];
+            $_SESSION['user_email'] = $targetUser['email'];
+            $_SESSION['user_role'] = $targetUser['role'];
+            
+            set_flash_message('success', "Você agora está personificando " . htmlspecialchars($targetUser['email']));
             header('Location: /dashboard');
             exit;
         }
+        
+        set_flash_message('error', 'Não foi possível personificar o usuário.');
         header('Location: /admin/dashboard');
         exit;
     }
 
     /**
-     * Para a sessão de personificação.
+     * Para a sessão de personificação e retorna ao admin original.
      */
     public function impersonateStop(): void
     {
-        if (isset($_SESSION['original_user'])) {
-            $originalUser = $_SESSION['original_user'];
-            (new AuthController())->createUserSession($originalUser['user_id'], $originalUser['user_email'], $originalUser['user_role']);
-            unset($_SESSION['original_user']);
-        }
-        header('Location: /admin/dashboard');
-        exit;
-    }
+        if (isset($_SESSION['original_user_id'])) {
+            $userModel = new User();
+            $adminUser = $userModel->findById($_SESSION['original_user_id']);
 
-    /**
-     * Atualiza os dados de um usuário (role, consultor, etc.).
-     */
-    public function updateUser(int $id): void
-    {
-        if (!validate_csrf_token($_POST['csrf_token'] ?? null)) {
-            http_response_code(403);
-            view('errors.403');
-            exit;
-        }
+            if ($adminUser) {
+                // Restaura a sessão do admin
+                $_SESSION['user_id'] = $adminUser['id'];
+                $_SESSION['user_email'] = $adminUser['email'];
+                $_SESSION['user_role'] = $adminUser['role'];
 
-        $userModel = new User();
+                // Limpa os dados da personificação
+                unset($_SESSION['original_user_id']);
+                unset($_SESSION['original_user_role']);
+
+                set_flash_message('success', 'Personificação encerrada. Bem-vindo de volta!');
+                header('Location: /admin/dashboard');
+                exit;
+            }
+        }
         
-        $newRole = $_POST['role'];
-        if (in_array($newRole, ['user', 'consultant', 'admin'])) {
-            $userModel->updateUserRole($id, $newRole);
-        }
-
-        $consultantId = $_POST['consultant_id'];
-        if ($consultantId === 'none') {
-            $userModel->unassignConsultant($id);
-        } elseif (is_numeric($consultantId)) {
-            $userModel->assignConsultant($id, (int)$consultantId);
-        }
-
-        set_flash_message('admin_success', 'Usuário atualizado com sucesso!');
-        header('Location: /admin/user/' . $id);
+        set_flash_message('error', 'Não havia uma sessão de personificação ativa.');
+        header('Location: /dashboard'); // Redireciona para o dashboard normal se algo der errado
         exit;
     }
 
