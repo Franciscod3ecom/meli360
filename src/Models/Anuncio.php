@@ -290,14 +290,22 @@ class Anuncio
         try {
             $updatedCount = 0;
             $sql = "UPDATE anuncios SET
-                        shipping_data = :shipping_data, category_data = :category_data,
-                        shipping_mode = :shipping_mode, is_free_shipping = :is_free_shipping, logistic_type = :logistic_type,
-                        sync_status = 2, last_sync_attempt = NOW()
+                        shipping_data = :shipping_data,
+                        category_data = :category_data,
+                        shipping_mode = :shipping_mode,
+                        is_free_shipping = :is_free_shipping,
+                        logistic_type = :logistic_type,
+                        category_accepts_variations = :category_accepts_variations,
+                        category_listing_allowed = :category_listing_allowed,
+                        sync_status = 2, 
+                        last_sync_attempt = NOW()
                     WHERE ml_item_id = :ml_item_id";
             $stmt = $this->db->prepare($sql);
 
             foreach ($analysisData as $data) {
-                $shippingJson = json_decode($data['shipping_data'], true);
+                $shippingJson = isset($data['shipping_data']) ? json_decode($data['shipping_data'], true) : null;
+                $categoryJson = isset($data['category_data']) ? json_decode($data['category_data'], true) : null;
+
                 $shippingMode = $shippingJson['mode'] ?? null;
                 $isFreeShipping = false;
                 if (isset($shippingJson['options'])) {
@@ -309,6 +317,9 @@ class Anuncio
                     }
                 }
                 $logisticType = $shippingJson['logistic_type'] ?? null;
+                
+                $acceptsVariations = $categoryJson['settings']['variations_allowed'] ?? false;
+                $listingAllowed = $categoryJson['settings']['listing_allowed'] ?? false;
 
                 $stmt->execute([
                     ':shipping_data' => $data['shipping_data'],
@@ -316,6 +327,8 @@ class Anuncio
                     ':shipping_mode' => $shippingMode,
                     ':is_free_shipping' => $isFreeShipping,
                     ':logistic_type' => $logisticType,
+                    ':category_accepts_variations' => $acceptsVariations,
+                    ':category_listing_allowed' => $listingAllowed,
                     ':ml_item_id' => $data['ml_item_id']
                 ]);
                 if ($stmt->rowCount() > 0) {

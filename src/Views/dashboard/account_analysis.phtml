@@ -1,0 +1,111 @@
+<main class="container mx-auto px-4 lg:px-6 py-8">
+    
+    <?php if (isset($isSyncRunning) && $isSyncRunning): ?>
+        <meta http-equiv="refresh" content="30">
+    <?php endif; ?>
+
+    <div class="flex justify-between items-center mb-6">
+        <div>
+            <a href="/dashboard" class="text-sm text-indigo-600 hover:underline">&larr; Voltar para Visão Geral</a>
+            <h1 class="text-3xl font-bold text-gray-800 mt-1">Análise da Conta: <?= htmlspecialchars($account['nickname'] ?? 'N/A') ?></h1>
+        </div>
+    </div>
+
+    <?php display_flash_message('success'); ?>
+    <?php display_flash_message('error'); ?>
+
+    <!-- Card de Gerenciamento -->
+    <div class="bg-white shadow rounded-lg p-6 mb-6">
+        <div class="flex justify-between items-center">
+            <div>
+                <h2 class="text-xl font-semibold">Gerenciar Sincronização</h2>
+                <p class="text-sm text-gray-600 mt-1">Status atual: 
+                    <span class="font-bold"><?= htmlspecialchars($account['sync_status_message'] ?? $account['sync_status']) ?></span>
+                </p>
+            </div>
+            <a href="/dashboard/sync/<?= $account['ml_user_id'] ?>" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors <?= ($isSyncRunning) ? 'opacity-50 cursor-not-allowed' : '' ?>" <?= ($isSyncRunning) ? 'disabled' : '' ?>>
+                <i class="fas fa-sync-alt mr-2 <?= ($isSyncRunning) ? 'animate-spin' : '' ?>"></i>
+                <?= ($isSyncRunning) ? 'Sincronizando...' : 'Sincronizar Agora' ?>
+            </a>
+        </div>
+    </div>
+
+    <!-- Card de Anúncios -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <h2 class="text-xl font-semibold mb-4">Seus Anúncios</h2>
+        <div class="overflow-x-auto">
+            <table class="min-w-full bg-white">
+                <thead class="bg-gray-800 text-white">
+                    <tr>
+                        <th class="py-3 px-4 uppercase font-semibold text-sm text-left">Título</th>
+                        <th class="py-3 px-4 uppercase font-semibold text-sm text-left">Status</th>
+                        <th class="py-3 px-4 uppercase font-semibold text-sm text-left">Preço</th>
+                        <th class="py-3 px-4 uppercase font-semibold text-sm text-left">Frete (SP)</th>
+                        <th class="py-3 px-4 uppercase font-semibold text-sm text-left">Variações?</th>
+                        <th class="py-3 px-4 uppercase font-semibold text-sm text-left">Ações</th>
+                    </tr>
+                </thead>
+                <tbody class="text-gray-700">
+                    <?php if (!empty($anuncios)): ?>
+                        <?php foreach ($anuncios as $anuncio): ?>
+                            <?php $shippingData = json_decode($anuncio['shipping_data'] ?? '[]', true); ?>
+                            <tr>
+                                <td class="py-3 px-4"><?= htmlspecialchars($anuncio['title']) ?></td>
+                                <td class="py-3 px-4">
+                                    <span class="px-2 py-1 font-semibold leading-tight <?= $anuncio['status'] === 'active' ? 'text-green-700 bg-green-100' : 'text-yellow-700 bg-yellow-100' ?> rounded-full">
+                                        <?= htmlspecialchars(ucfirst($anuncio['status'])) ?>
+                                    </span>
+                                </td>
+                                <td class="py-3 px-4">R$ <?= number_format($anuncio['price'], 2, ',', '.') ?></td>
+                                <td class="py-3 px-4">
+                                    <?php if (isset($shippingData['SP']['cost']) && $shippingData['SP']['cost'] > 0): ?>
+                                        R$ <?= number_format($shippingData['SP']['cost'], 2, ',', '.') ?>
+                                    <?php elseif (isset($shippingData['SP']['free']) && $shippingData['SP']['free']): ?>
+                                        <span class="text-green-600 font-semibold">Grátis</span>
+                                    <?php else: ?>
+                                        <span class="text-gray-400">N/D</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="py-3 px-4">
+                                    <?php if ($anuncio['sync_status'] >= 2): ?>
+                                        <span class="font-semibold <?= $anuncio['category_accepts_variations'] ? 'text-green-600' : 'text-red-600' ?>">
+                                            <?= $anuncio['category_accepts_variations'] ? 'Sim' : 'Não' ?>
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="text-gray-400">...</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="py-3 px-4">
+                                    <a href="/dashboard/anuncio/<?= htmlspecialchars($anuncio['ml_item_id']) ?>" class="text-blue-600 hover:underline">Ver Detalhes</a>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="6" class="text-center py-10">Nenhum anúncio encontrado. Tente sincronizar a conta.</td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Controles de Paginação -->
+        <?php if ($totalPages > 1): ?>
+            <div class="flex justify-between items-center mt-6">
+                <div>
+                    <p class="text-sm text-gray-700">
+                        Página <span class="font-medium"><?= $currentPage ?></span> de <span class="font-medium"><?= $totalPages ?></span>
+                    </p>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <?php if ($currentPage > 1): ?>
+                        <a href="?page=<?= $currentPage - 1 ?>" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Anterior</a>
+                    <?php endif; ?>
+                    <?php if ($currentPage < $totalPages): ?>
+                        <a href="?page=<?= $currentPage + 1 ?>" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Próximo</a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        <?php endif; ?>
+    </div>
+</main>

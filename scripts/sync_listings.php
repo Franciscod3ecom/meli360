@@ -113,66 +113,71 @@ try {
     // TAREFA 3: PROCESSAR ANÁLISE PROFUNDA (FRETE E CATEGORIA) (status=1)
     // -------------------------------------------------------------------
     log_message("SYNC_CRON: [TAREFA 3] Buscando lote de anúncios para análise profunda (status=1)...");
-    $anunciosParaAnalisar = $anuncioModel->findAnunciosToProcess(1, 10); // Menor lote devido a múltiplas chamadas de API por item
+    // Lote menor, pois cada item pode gerar múltiplas chamadas de API
+    $anunciosParaAnalisar = $anuncioModel->findAnunciosToProcess(1, 5); 
 
     if (!empty($anunciosParaAnalisar)) {
-        log_message("SYNC_CRON: [TAREFA 3] Encontrados " . count($anunciosParaAnalisar) . " anúncios para análise profunda.");
-        $analysisDataBatch = [];
-        $saasAccessTokens = []; // Cache de tokens para evitar buscas repetidas
+        $mlUserId = $anunciosParaAnalisar[0]['ml_user_id'];
+        $saasUserId = $anunciosParaAnalisar[0]['saas_user_id'];
+        
+        log_message("SYNC_CRON: [TAREFA 3] Encontrados " . count($anunciosParaAnalisar) . " anúncios para análise profunda para o ML User ID {$mlUserId}.");
 
-        foreach ($anunciosParaAnalisar as $anuncio) {
-            $saasUserId = $anuncio['saas_user_id'];
-            $mlUserId = $anuncio['ml_user_id'];
-            $itemId = $anuncio['ml_item_id'];
-            $categoryId = $anuncio['category_id'];
+        $accessToken = $mlUserModel->getValidAccessToken($saasUserId, $mlUserId);
+        if (!$accessToken) {
+            log_message("SYNC_CRON: [TAREFA 3] Falha de token para {$mlUserId}. Pulando lote.", 'ERROR');
+        } else {
+            $mlApi = new MercadoLivreApi($accessToken);
+            $mlUserModel->updateSyncStatusByMlUserId($mlUserId, 'RUNNING', 'Fase 3/4: Análise profunda...');
+            
+            $analysisDataBatch = [];
+            $capitais = ['SP' => '01001000', 'RJ' => '20010000', 'MG' => '30112000', 'PR' => '80010000', 'SC' => '88010000'];
 
-            // Obter token de acesso (com cache)
-            if (!isset($saasAccessTokens[$saasUserId])) {
-                 $saasAccessTokens[$saasUserId] = $mlUserModel->getValidAccessToken($saasUserId, $mlUserId);
+            foreach ($anunciosParaAnalisar as $anuncio) {
+                $itemId = $anuncio['ml_item_id'];
+                $categoryId = $anuncio['category_id'];
+
+                if (empty($categoryId)) {
+                    $anuncioModel->markAsFailed([$itemId]);
+                    continue;
+                }
+
+                // 1. Buscar dados da categoria
+                $categoryData = $mlApi->fetchCategoryDetails($categoryId);
+                usleep(250000); // Pausa de 0.25s
+
+                // 2. Buscar dados de frete para as capitais
+                $shippingCosts = [];
+                foreach ($capitais as $uf => $zip) {
+                    $shippingOption = $mlApi->fetchShippingOptions($itemId, $zip);
+                    $shippingCosts[$uf] = [
+                        'zip_code' => $zip,
+                        'cost' => $shippingOption['options'][0]['cost'] ?? 0,
+                        'free' => isset($shippingOption['options'][0]['free_method'])
+                    ];
+                    usleep(250000); // Pausa de 0.25s
+                }
+                
+                // Salva os custos de frete na tabela dedicada
+                $anuncioModel->saveShippingCosts($anuncio['id'], $itemId, $shippingCosts);
+
+                // Prepara o batch para a tabela principal
+                $analysisDataBatch[] = [
+                    'ml_item_id' => $itemId,
+                    'shipping_data' => json_encode($shippingCosts), // Salva um resumo
+                    'category_data' => json_encode($categoryData)
+                ];
             }
-            $accessToken = $saasAccessTokens[$saasUserId];
 
-            if (!$accessToken || !$categoryId) {
-                log_message("SYNC_CRON: [TAREFA 3] Token ou CategoryID ausente para o item {$itemId}. Marcando como falho.", 'WARNING');
-                $anuncioModel->markAsFailed($itemId);
-                continue;
+            if (!empty($analysisDataBatch)) {
+                $anuncioModel->bulkUpdateDeepAnalysis($analysisDataBatch);
+                log_message("SYNC_CRON: [TAREFA 3 SUCESSO] Lote de " . count($analysisDataBatch) . " anúncios analisado e salvo.");
             }
-
-            $mlApi = new \App\Models\MercadoLivreApi($accessToken);
-
-            // Busca dados de frete e categoria em paralelo
-            $urls = [
-                'shipping' => "https://api.mercadolibre.com/items/{$itemId}/shipping_options",
-                'category' => "https://api.mercadolibre.com/categories/{$categoryId}"
-            ];
-            $apiResults = $mlApi->getParallel($urls);
-
-            $shippingData = $apiResults['shipping'] ?? null;
-            $categoryData = $apiResults['category'] ?? null;
-
-            // Se alguma chamada falhar, marcamos o anúncio como falho e continuamos
-            if (!$shippingData || !$categoryData) {
-                log_message("SYNC_CRON: [TAREFA 3] Falha ao buscar dados de frete/categoria para o item {$itemId}. Marcando como falho.", 'WARNING');
-                $anuncioModel->markAsFailed($itemId);
-                continue;
-            }
-
-            $analysisDataBatch[] = [
-                'ml_item_id' => $itemId,
-                'shipping_data' => json_encode($shippingData),
-                'category_data' => json_encode($categoryData)
-            ];
         }
-
-        if (!empty($analysisDataBatch)) {
-            $updatedCount = $anuncioModel->bulkUpdateDeepAnalysis($analysisDataBatch);
-            log_message("SYNC_CRON: [TAREFA 3] Lote de análise profunda processado. {$updatedCount} anúncios atualizados para status 2.");
-        }
-
-    } else {
-        log_message("SYNC_CRON: [TAREFA 3] Nenhum anúncio com status 1 para processar.");
+        
+        log_message('SYNC_CRON: --- Fim do ciclo (Tarefa 3 concluída) ---');
+        exit;
     }
-
+    log_message("SYNC_CRON: [TAREFA 3] Nenhum anúncio para análise profunda.");
 
     // -------------------------------------------------------------------
     // TAREFA 4: FINALIZAR SINCRONIZAÇÕES CONCLUÍDAS

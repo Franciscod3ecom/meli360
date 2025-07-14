@@ -2,7 +2,6 @@
 namespace App\Controllers;
 
 use App\Models\User;
-use App\Models\Plan;
 use App\Core\Validator;
 
 class SettingsController
@@ -13,71 +12,55 @@ class SettingsController
     public function index(): void
     {
         $userModel = new User();
-        $planModel = new Plan();
-
         $user = $userModel->findById($_SESSION['user_id']);
-        $plans = $planModel->getActivePlans(); // Para futura exibição de planos
 
-        if (!$user) {
-            // Medida de segurança, embora improvável de acontecer com um usuário logado.
-            set_flash_message('error', 'Usuário não encontrado.');
-            header('Location: /dashboard');
-            exit();
-        }
-
-        view('settings.index', [
-            'user' => $user,
-            'plans' => $plans
-        ]);
-        exit();
+        view('settings.index', ['user' => $user]);
     }
 
     /**
-     * Atualiza as informações do usuário.
+     * Processa a atualização dos dados do usuário.
      */
     public function update(): void
     {
-        if (!validate_csrf_token($_POST['csrf_token'] ?? null)) {
-            http_response_code(403);
-            view('errors.403');
+        $userId = $_SESSION['user_id'];
+        $name = $_POST['name'];
+        $whatsappJid = $_POST['whatsapp_jid'];
+        $password = $_POST['password'];
+        $passwordConfirm = $_POST['password_confirm'];
+
+        $errors = [];
+
+        if (!Validator::string($name, 1, 255)) {
+            $errors[] = "O nome é inválido.";
+        }
+        
+        // Validação simples para o JID do WhatsApp (ex: 5511999998888@s.whatsapp.net)
+        if (!empty($whatsappJid) && !filter_var("test@s.whatsapp.net", FILTER_VALIDATE_EMAIL) && strlen($whatsappJid) < 15) {
+            $errors[] = "O número do WhatsApp (JID) parece inválido. Deve ser no formato 5511999998888@s.whatsapp.net";
+        }
+
+        if (!empty($password)) {
+            if ($password !== $passwordConfirm) {
+                $errors[] = "As senhas não coincidem.";
+            }
+            if (!Validator::string($password, 8)) {
+                $errors[] = "A nova senha deve ter pelo menos 8 caracteres.";
+            }
+        }
+
+        if (!empty($errors)) {
+            set_flash_message('error', implode('<br>', $errors));
+            header('Location: /dashboard/settings');
             exit;
         }
 
-        $saasUserId = $_SESSION['user_id'];
         $userModel = new User();
+        $success = $userModel->updateProfile($userId, $name, $whatsappJid, $password);
 
-        // Atualizar nome
-        if (!empty($_POST['name'])) {
-            $userModel->updateName($saasUserId, $_POST['name']);
-        }
-
-        // Atualizar WhatsApp
-        if (!empty($_POST['whatsapp'])) {
-            $whatsapp_cleaned = preg_replace('/[^\d]/', '', $_POST['whatsapp']);
-            if (preg_match('/^\d{10,11}$/', $whatsapp_cleaned)) {
-                $whatsapp_jid = "55" . $whatsapp_cleaned . "@s.whatsapp.net";
-                $userModel->updateWhatsappJid($saasUserId, $whatsapp_jid);
-            }
-        }
-
-        // Atualizar Senha
-        if (!empty($_POST['current_password']) && !empty($_POST['new_password']) && !empty($_POST['password_confirmation'])) {
-            if ($_POST['new_password'] === $_POST['password_confirmation']) {
-                $user = $userModel->findById($saasUserId);
-                if (password_verify($_POST['current_password'], $user['password_hash'])) {
-                    $newPasswordHash = password_hash($_POST['new_password'], PASSWORD_DEFAULT);
-                    $userModel->updatePassword($saasUserId, $newPasswordHash);
-                    set_flash_message('settings_success', 'Senha alterada com sucesso!');
-                } else {
-                    set_flash_message('settings_error', 'A senha atual está incorreta.');
-                }
-            } else {
-                set_flash_message('settings_error', 'A nova senha e a confirmação não coincidem.');
-            }
-        }
-
-        if (!has_flash_message('settings_error')) {
-            set_flash_message('settings_success', 'Perfil atualizado com sucesso!');
+        if ($success) {
+            set_flash_message('success', 'Suas informações foram atualizadas com sucesso.');
+        } else {
+            set_flash_message('error', 'Ocorreu um erro ao atualizar suas informações.');
         }
 
         header('Location: /dashboard/settings');

@@ -2,83 +2,58 @@
 include_once BASE_PATH . '/src/Views/layouts/header.phtml';
 ?>
 
-<h1 class="text-3xl font-bold text-gray-800 mb-6">⚙️ Configurações da Conta</h1>
+<main class="container mx-auto px-4 lg:px-6 py-8">
+    <h1 class="text-3xl font-bold text-gray-800 mb-6">⚙️ Configurações da Conta</h1>
 
-<?php
-// Exibe mensagens flash de sucesso ou erro, se houver
-if (isset($_SESSION['flash_message'])) {
-    $message = $_SESSION['flash_message'];
-    unset($_SESSION['flash_message']);
-    $type = $message['type'] === 'success' ? 'green' : 'red';
-    echo "<div class='bg-{$type}-100 border-l-4 border-{$type}-500 text-{$type}-700 p-4 mb-6 rounded-md' role='alert'>";
-    echo "<p>" . htmlspecialchars($message['message']) . "</p>";
-    echo "</div>";
-}
-?>
+    <?php display_flash_message('success'); ?>
+    <?php display_flash_message('error'); ?>
 
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-    <!-- Coluna de Perfil -->
-    <div class="lg:col-span-2 bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-xl font-semibold mb-4">👤 Meu Perfil</h2>
+    <div class="bg-white p-8 rounded-lg shadow-md max-w-2xl mx-auto">
+        <form action="/dashboard/settings/update" method="POST">
+            <input type="hidden" name="csrf_token" value="<?= get_csrf_token() ?>">
 
-        <form action="/dashboard/settings/update" method="POST" class="space-y-6">
-            <?= generate_csrf_token_input() ?>
-            
-            <div>
-                <label for="name" class="block text-sm font-medium text-gray-700">Nome Completo</label>
-                <input type="text" name="name" id="name" value="<?= htmlspecialchars($user['name']) ?>" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" required>
+            <!-- Nome -->
+            <div class="mb-6">
+                <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Nome Completo</label>
+                <input type="text" id="name" name="name" value="<?= htmlspecialchars($user['name']) ?>" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+            </div>
+
+            <!-- Email (somente leitura) -->
+            <div class="mb-6">
+                <label for="email" class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <input type="email" id="email" name="email" value="<?= htmlspecialchars($user['email']) ?>" readonly disabled class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 cursor-not-allowed">
+            </div>
+
+            <!-- WhatsApp JID -->
+            <div class="mb-6">
+                <label for="whatsapp_jid" class="block text-sm font-medium text-gray-700 mb-1">WhatsApp (JID)</label>
+                <input type="text" id="whatsapp_jid" name="whatsapp_jid" value="<?= htmlspecialchars($user['whatsapp_jid'] ?? '') ?>" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="Ex: 5511999998888@s.whatsapp.net">
+                <p class="text-xs text-gray-500 mt-1">Necessário para receber notificações e interagir com a IA.</p>
+            </div>
+
+            <hr class="my-8">
+
+            <h2 class="text-lg font-semibold mb-4">Alterar Senha</h2>
+            <!-- Nova Senha -->
+            <div class="mb-6">
+                <label for="password" class="block text-sm font-medium text-gray-700 mb-1">Nova Senha</label>
+                <input type="password" id="password" name="password" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="Deixe em branco para não alterar">
+            </div>
+
+            <!-- Confirmar Nova Senha -->
+            <div class="mb-6">
+                <label for="password_confirm" class="block text-sm font-medium text-gray-700 mb-1">Confirmar Nova Senha</label>
+                <input type="password" id="password_confirm" name="password_confirm" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
             </div>
 
             <div>
-                <label for="email" class="block text-sm font-medium text-gray-700">E-mail</label>
-                <input type="email" name="email" id="email" value="<?= htmlspecialchars($user['email']) ?>" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm bg-gray-100 cursor-not-allowed" readonly>
-                <p class="text-xs text-gray-500 mt-1">O e-mail não pode ser alterado.</p>
-            </div>
-
-            <div>
-                <label for="whatsapp" class="block text-sm font-medium text-gray-700">Número do WhatsApp</label>
-                <input type="text" name="whatsapp" id="whatsapp" value="<?= htmlspecialchars($user['whatsapp_number'] ?? '') ?>" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="(XX) XXXXX-XXXX">
-                <p class="text-xs text-gray-500 mt-1">Necessário para receber notificações e usar o Respondedor IA.</p>
-            </div>
-
-            <div class="border-t pt-6">
-                <h3 class="text-lg font-medium text-gray-900">Alterar Senha</h3>
-                <p class="mt-1 text-sm text-gray-500">Deixe os campos abaixo em branco para manter sua senha atual.</p>
-                <div class="mt-4 space-y-4">
-                    <div>
-                        <label for="current_password" class="block text-sm font-medium text-gray-700">Senha Atual</label>
-                        <input type="password" name="current_password" id="current_password" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm">
-                    </div>
-                    <div>
-                        <label for="new_password" class="block text-sm font-medium text-gray-700">Nova Senha</label>
-                        <input type="password" name="new_password" id="new_password" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm">
-                    </div>
-                    <div>
-                        <label for="password_confirmation" class="block text-sm font-medium text-gray-700">Confirmar Nova Senha</label>
-                        <input type="password" name="password_confirmation" id="password_confirmation" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm">
-                    </div>
-                </div>
-            </div>
-
-            <div class="flex justify-end">
-                <button type="submit" class="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+                <button type="submit" class="w-full bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-700 transition-colors">
                     Salvar Alterações
                 </button>
             </div>
         </form>
     </div>
-
-    <!-- Coluna de Assinatura -->
-    <div class="lg:col-span-1 bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-xl font-semibold mb-4">💳 Minha Assinatura</h2>
-        <!-- Lógica para exibir status da assinatura e planos aqui -->
-        <p class="text-gray-600">Status da Assinatura: <span class="font-semibold text-green-600">Ativo</span></p>
-        <p class="text-sm text-gray-500 mt-2">Seu plano atual é o "Plano Pro".</p>
-        <a href="/billing/plans" class="mt-4 inline-block w-full text-center bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-300 transition-colors">
-            Gerenciar Assinatura
-        </a>
-    </div>
-</div>
+</main>
 
 <?php
 include_once BASE_PATH . '/src/Views/layouts/footer.phtml';

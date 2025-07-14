@@ -72,6 +72,7 @@ class MercadoLivreUser
         $encryptedRefreshToken = Crypto::encrypt($refreshToken, $this->key);
         $expiresAt = date('Y-m-d H:i:s', time() + $expiresIn);
 
+        // A query agora sempre atualiza o nickname, garantindo que ele nunca fique como "N/A"
         $sql = "INSERT INTO mercadolibre_users (saas_user_id, ml_user_id, nickname, access_token, refresh_token, expires_at, sync_status)
                 VALUES (:saas_user_id, :ml_user_id, :nickname, :access_token, :refresh_token, :expires_at, 'NOT_SYNCED')
                 ON DUPLICATE KEY UPDATE
@@ -79,7 +80,8 @@ class MercadoLivreUser
                     refresh_token = VALUES(refresh_token),
                     expires_at = VALUES(expires_at),
                     nickname = VALUES(nickname),
-                    sync_status = IF(sync_status = 'COMPLETED', 'NOT_SYNCED', sync_status)";
+                    sync_status = IF(sync_status = 'COMPLETED', 'NOT_SYNCED', sync_status),
+                    updated_at = NOW()";
 
         $stmt = $this->db->prepare($sql);
         return $stmt->execute([
@@ -92,6 +94,42 @@ class MercadoLivreUser
         ]);
     }
 
+    /**
+     * Busca todas as contas de um usuário SaaS com estatísticas agregadas de anúncios.
+     *
+     * @param int $saasUserId
+     * @return array
+     */
+    public function findAllBySaasUserIdWithStats(int $saasUserId): array
+    {
+        $sql = "SELECT 
+                    mu.*,
+                    (SELECT COUNT(*) FROM anuncios a WHERE a.ml_user_id = mu.ml_user_id) as total_anuncios,
+                    (SELECT COUNT(*) FROM anuncios a WHERE a.ml_user_id = mu.ml_user_id AND a.status = 'active') as active_anuncios
+                FROM mercadolibre_users mu
+                WHERE mu.saas_user_id = :saas_user_id
+                ORDER BY mu.nickname ASC";
+        
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([':saas_user_id' => $saasUserId]);
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Busca uma conta ML específica para um usuário SaaS.
+     * Usado para validar o acesso na página de análise de conta.
+     *
+     * @param int $saasUserId
+     * @param int $mlUserId
+     * @return array|false
+     */
+    public function findByMlUserIdForUser(int $saasUserId, int $mlUserId): array|false
+    {
+        $stmt = $this->db->prepare("SELECT * FROM mercadolibre_users WHERE saas_user_id = :saas_user_id AND ml_user_id = :ml_user_id");
+        $stmt->execute([':saas_user_id' => $saasUserId, ':ml_user_id' => $mlUserId]);
+        return $stmt->fetch();
+    }
+    
     public function findAllBySaasUserId(int $saasUserId): array
     {
         $stmt = $this->db->prepare("SELECT * FROM mercadolibre_users WHERE saas_user_id = :saas_user_id ORDER BY nickname ASC");

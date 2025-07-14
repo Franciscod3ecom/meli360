@@ -7,62 +7,55 @@ use App\Models\MercadoLivreUser;
 class DashboardController
 {
     /**
-     * Exibe a página principal de "Visão Geral" do dashboard.
+     * Exibe a página principal "Visão Geral", que agora é o hub central.
+     * Lista todas as contas ML conectadas pelo usuário.
      */
     public function index(): void
     {
+        $saasUserId = $_SESSION['user_id'];
         $mlUserModel = new MercadoLivreUser();
-        $mlConnections = $mlUserModel->findAllBySaasUserId($_SESSION['user_id']);
+        
+        // Busca todas as contas conectadas e suas estatísticas agregadas
+        $mlConnections = $mlUserModel->findAllBySaasUserIdWithStats($saasUserId);
         
         view('dashboard.index', ['mlConnections' => $mlConnections]);
     }
 
     /**
-     * Exibe a página de "Análise de Anúncios".
+     * Exibe a página de análise detalhada para uma conta ML específica.
+     *
+     * @param int $mlUserId O ID da conta do Mercado Livre a ser analisada.
      */
-    public function analysis(): void
+    public function accountAnalysis(int $mlUserId): void
     {
         $saasUserId = $_SESSION['user_id'];
-        $activeMlAccountId = $_SESSION['active_ml_account_id'] ?? null;
+        $mlUserModel = new MercadoLivreUser();
+        
+        // Valida se a conta pertence ao usuário logado
+        $account = $mlUserModel->findByMlUserIdForUser($saasUserId, $mlUserId);
+        if (!$account) {
+            set_flash_message('error', 'Conta não encontrada ou não pertence a você.');
+            header('Location: /dashboard');
+            exit;
+        }
 
         $anuncioModel = new Anuncio();
-        $mlUserModel = new MercadoLivreUser();
+        $limit = 50;
+        $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+        $offset = ($page > 0) ? ($page - 1) * $limit : 0;
 
-        $mlConnections = $mlUserModel->findAllBySaasUserId($saasUserId);
-
-        $isSyncRunning = false;
-        foreach ($mlConnections as $conn) {
-            if (in_array($conn['sync_status'], ['QUEUED', 'RUNNING'])) {
-                $isSyncRunning = true;
-                break;
-            }
-        }
-
-        $anuncios = [];
-        $totalAnuncios = 0;
-        $totalPages = 0;
-        $page = 1;
-        $limit = 50; // Define um limite padrão de anúncios por página
-
-        if ($activeMlAccountId) {
-            $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-            $offset = ($page > 0) ? ($page - 1) * $limit : 0;
-            
-            // Corrige a chamada para passar os 4 argumentos esperados
-            $anuncios = $anuncioModel->findAllByMlUserId($saasUserId, $activeMlAccountId, $limit, $offset);
-            
-            $totalAnuncios = $anuncioModel->countByMlUserId($saasUserId, $activeMlAccountId);
-            $totalPages = ceil($totalAnuncios / $limit);
-        }
+        $anuncios = $anuncioModel->findAllByMlUserId($saasUserId, $mlUserId, $limit, $offset);
+        $totalAnuncios = $anuncioModel->countByMlUserId($saasUserId, $mlUserId);
+        $totalPages = ceil($totalAnuncios / $limit);
         
-        view('dashboard.analysis', [
+        $isSyncRunning = in_array($account['sync_status'], ['QUEUED', 'RUNNING']);
+
+        view('dashboard.account_analysis', [
+            'account' => $account,
             'anuncios' => $anuncios,
-            'mlConnections' => $mlConnections,
-            'activeMlAccountId' => $activeMlAccountId,
-            'isSyncRunning' => $isSyncRunning,
-            'totalAnuncios' => $totalAnuncios,
             'totalPages' => $totalPages,
-            'currentPage' => $page
+            'currentPage' => $page,
+            'isSyncRunning' => $isSyncRunning
         ]);
     }
 

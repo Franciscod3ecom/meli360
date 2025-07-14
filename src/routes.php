@@ -65,14 +65,15 @@ $router->before('GET|POST', '/dashboard/analysis|/dashboard/responder|/dashboard
 
 // Dashboard e Funcionalidades Principais
 $router->get('/dashboard', DashboardController::class . '@index');
-$router->get('/dashboard/analysis', DashboardController::class . '@analysis');
+$router->get('/dashboard/account/(\d+)', DashboardController::class . '@accountAnalysis'); // Nova rota para análise de conta
 $router->get('/dashboard/responder', DashboardController::class . '@responder');
 $router->get('/dashboard/anuncio/(\w+)', DashboardController::class . '@anuncioDetails');
-$router->get('/dashboard/sync/{mlUserId}', DashboardController::class . '@requestSync');
-$router->get('/dashboard/conectar/mercadolivre', MercadoLivreController::class . '@redirectToAuth');
+$router->get('/dashboard/sync/(\d+)', DashboardController::class . '@requestSync');
+$router->get('/ml/auth', MercadoLivreController::class . '@redirectToAuth'); // Rota de conexão
 
 // Gestão de Contas e Configurações
-$router->get('/dashboard/set-active-account/(\d+)', AccountController::class . '@setActiveAccount');
+// A rota set-active-account não é mais necessária, a seleção é implícita ao navegar
+// $router->get('/dashboard/set-active-account/(\d+)', AccountController::class . '@setActiveAccount');
 $router->get('/dashboard/settings', SettingsController::class . '@index');
 $router->post('/dashboard/settings/update', SettingsController::class . '@update');
 
